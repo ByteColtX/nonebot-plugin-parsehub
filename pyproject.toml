@@ -10,7 +10,8 @@ license-files = ["LICENSE"]
 keywords = ["nonebot", "nonebot2", "plugin", "parsehub", "parser", "media", "onebot"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Framework :: NoneBot",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Operating System :: OS Independent",
   "Topic :: Communications :: Chat",
 ]
