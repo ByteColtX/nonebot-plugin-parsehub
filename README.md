@@ -1,14 +1,17 @@
-<div align="center">
+## ✨ nonebot-plugin-parsehub ✨
 
-# nonebot-plugin-parsehub
+[![LICENSE](https://img.shields.io/github/license/ByteColtX/nonebot-plugin-parsehub.svg)](./LICENSE)
+[![pypi](https://img.shields.io/pypi/v/nonebot-plugin-parsehub.svg)](https://pypi.python.org/pypi/nonebot-plugin-parsehub)
+[![python](https://img.shields.io/badge/python-3.12|3.13-blue.svg)](https://www.python.org)
+[![uv](https://img.shields.io/badge/package%20manager-uv-black?style=flat-square&logo=uv)](https://github.com/astral-sh/uv)
 
-**基于 [ParseHub](https://github.com/z-mio/ParseHub) 的社交媒体链接解析插件**
+[![ruff](https://img.shields.io/badge/code%20style-ruff-black?style=flat-square&logo=ruff)](https://github.com/astral-sh/ruff)
+[![tests](https://img.shields.io/badge/tests-109%20passed-brightgreen?style=flat-square)](https://github.com/ByteColtX/nonebot-plugin-parsehub)
 
-群里出现分享链接时自动解析，并把视频 / 图集 / 正文发回群
+## 📖 介绍
 
-</div>
-
-## 特性
+基于 [ParseHub](https://github.com/z-mio/ParseHub) 的社交媒体链接解析插件：群里出现受支持的分享链接时自动解析，
+把视频 / 图集 / 图文发出来，并配一张 App Store「Today」风格的信息卡片。
 
 - **自动解析**：群消息里出现受支持的链接时自动处理，也可用命令手动触发
 - **按会话开关**：`解析开关` 可以把某个群 / 某个私聊的解析关掉，超管和群管理可操作
@@ -25,7 +28,7 @@
 - **时长保护**：视频超过 `PARSEHUB_MAX_SECONDS`（默认 5 分钟）时不下载，只发封面卡片 + 一句「视频太长啦，还是去 xx 看吧」
 - **媒体缓存**：同一作品 24 小时内再出现，直接发本地那份，不再解析下载
 
-## 效果图
+## 🎨 效果图
 
 B 站视频卡片：
 
@@ -35,60 +38,144 @@ B 站视频卡片：
 
 ![抖音卡片](https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-douyin.jpg)
 
-## 安装
+## 💿 安装
 
-使用 nb-cli（推荐）：
+使用 nb-cli 安装
 
-```bash
-nb plugin install nonebot-plugin-parsehub
-```
-
-或直接安装包：
+在 nonebot2 项目的根目录下打开命令行, 输入以下指令即可安装
 
 ```bash
-pip install nonebot-plugin-parsehub
+nb plugin install nonebot-plugin-parsehub --upgrade
 ```
 
-## 配置
+使用 **pypi** 源安装
 
-在 `.env` / `.env.prod` 中填写，全部可选（零配置即可加载）。
+```bash
+nb plugin install nonebot-plugin-parsehub --upgrade -i "https://pypi.org/simple"
+```
 
-| 配置项 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `PARSEHUB_AUTO` | bool | `true` | 群里出现链接时自动解析（总开关） |
-| `PARSEHUB_MAX_MB` | int | `100` | 单个媒体文件体积上限，超过直接跳过 |
-| `PARSEHUB_MAX_SECONDS` | int | `300` | 视频时长上限（秒），超过只发封面 + 一句提示、不下载；`0` = 不限 |
-| `PARSEHUB_CACHE_HOURS` | int | `24` | 媒体缓存保留小时数，命中就直接发本地那份；`0` = 关闭缓存 |
-| `PARSEHUB_CACHE_MAX_MB` | int | `1024` | 媒体缓存总容量上限（MB），超了按最久没用过的删 |
-| `PARSEHUB_CARD` | bool | `true` | 是否发信息卡片图（失败自动退回文字） |
-| `PARSEHUB_CARD_FONT` | str | 空 | 中文字体路径，留空则自动找系统字体 / 下载 |
-| `PARSEHUB_FORWARD_TIMEOUT` | int | `60` | 合并转发等协议端的秒数，超时才逐条发 |
-| `PARSEHUB_SEND_TEXT` | bool | `true` | 是否发送标题 / 正文 |
-| `PARSEHUB_MAX_CHARS` | int | `300` | 正文最多发送多少字符 |
-| `PARSEHUB_FAIL_NOTICE` | bool | `true` | 视频发送失败时是否额外发文字提示 |
-| `PARSEHUB_PROXY` | str | 空 | 解析 / 下载代理，如 `http://127.0.0.1:7890` |
-| `PARSEHUB_PROXY_PLATFORMS` | list[str] | 海外 8 平台 | 只对这些平台走代理，留空 = 全部走 |
-| `PARSEHUB_COOKIE` | str | 空 | 兜底 cookie（优先读 parsehub 自己的 cookies.toml） |
-| `PARSEHUB_TIMEOUT` | int | `180` | 解析 + 下载总超时（秒） |
-| `PARSEHUB_FILES_HOST` | str | 空 | 媒体中转服务对外地址，留空自动探测内网 IP |
-| `PARSEHUB_FILES_PORT` | int | `21473` | 媒体中转服务端口 |
-| `PARSEHUB_KEEP_MINUTES` | int | `30` | 临时文件保留分钟数 |
-| `PARSEHUB_DEDUPE_SECONDS` | int | `120` | 同一会话内同一链接的去重窗口（秒），0 = 不去重 |
-| `PARSEHUB_CONCURRENCY` | int | `2` | 同时处理的任务数 |
+使用**清华源**安装
+
+```bash
+nb plugin install nonebot-plugin-parsehub --upgrade -i "https://pypi.tuna.tsinghua.edu.cn/simple"
+```
+
+使用包管理器安装
+
+在 nonebot2 项目的插件目录下, 打开命令行, 根据你使用的包管理器, 输入相应的安装命令
+
+uv
+
+```bash
+uv add nonebot-plugin-parsehub
+```
+
+安装仓库 main 分支
+
+```bash
+uv add git+https://github.com/ByteColtX/nonebot-plugin-parsehub@main
+```
+
+pdm
+
+```bash
+pdm add nonebot-plugin-parsehub
+```
+
+安装仓库 main 分支
+
+```bash
+pdm add git+https://github.com/ByteColtX/nonebot-plugin-parsehub@main
+```
+
+poetry
+
+```bash
+poetry add nonebot-plugin-parsehub
+```
+
+安装仓库 main 分支
+
+```bash
+poetry add git+https://github.com/ByteColtX/nonebot-plugin-parsehub@main
+```
+
+打开 nonebot2 项目根目录下的 `pyproject.toml` 文件, 在 `[tool.nonebot]` 部分追加写入
+
+```toml
+plugins = ["nonebot_plugin_parsehub"]
+```
+
+使用 nbr 安装(使用 uv 管理依赖可用)
+
+[nbr](https://github.com/fllesser/nbr) 是一个基于 uv 的 nb-cli，可以方便地管理 nonebot2
+
+```bash
+nbr plugin install nonebot-plugin-parsehub
+```
+
+使用 **pypi** 源安装
+
+```bash
+nbr plugin install nonebot-plugin-parsehub -i "https://pypi.org/simple"
+```
+
+使用**清华源**安装
+
+```bash
+nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn/simple"
+```
+
+## ⚙️ 配置
+
+在 nonebot2 项目的`.env`文件中添加下表中的配置, 全部可选（零配置即可加载运行）
+
+| 配置项 | 必填 | 默认值 | 说明 |
+| :---: | :---: | :---: | :--- |
+| `PARSEHUB_AUTO` | 否 | `true` | 群里出现链接时自动解析（总开关） |
+| `PARSEHUB_MAX_MB` | 否 | `100` | 单个媒体文件体积上限（MB），超过直接跳过；`0` = 不限 |
+| `PARSEHUB_MAX_SECONDS` | 否 | `300` | 视频时长上限（秒），超过只发封面 + 一句提示、不下载；`0` = 不限 |
+| `PARSEHUB_DEDUPE_SECONDS` | 否 | `120` | 同一会话内同一链接的去重窗口（秒），`0` = 不去重 |
+| `PARSEHUB_CONCURRENCY` | 否 | `2` | 同时处理的任务数 |
+| `PARSEHUB_PROXY` | 否 | 无 | 解析 / 下载代理，如 `http://127.0.0.1:7890` |
+| `PARSEHUB_PROXY_PLATFORMS` | 否 | 海外 8 平台 | 只对这些平台走代理，留空 = 全部走（列表要用合法 JSON） |
+| `PARSEHUB_COOKIE` | 否 | 无 | 兜底 cookie（优先读 parsehub 自己的 `cookies.toml`） |
+| `PARSEHUB_TIMEOUT` | 否 | `180` | 解析 + 下载总超时（秒） |
+| `PARSEHUB_CACHE_HOURS` | 否 | `24` | 媒体缓存保留小时数，命中就直接发本地那份；`0` = 关闭缓存 |
+| `PARSEHUB_CACHE_MAX_MB` | 否 | `1024` | 媒体缓存总容量上限（MB），超了按最久没用过的删 |
+| `PARSEHUB_CARD` | 否 | `true` | 是否发信息卡片图（失败自动退回文字） |
+| `PARSEHUB_CARD_FONT` | 否 | 无 | 中文字体路径，留空则自动找系统字体 / 下载 |
+| `PARSEHUB_FORWARD_TIMEOUT` | 否 | `60` | 合并转发等待协议端的秒数，超时才逐条发 |
+| `PARSEHUB_SEND_TEXT` | 否 | `true` | 是否发送标题 / 正文 |
+| `PARSEHUB_MAX_CHARS` | 否 | `300` | 正文最多发送多少字符 |
+| `PARSEHUB_FAIL_NOTICE` | 否 | `true` | 视频发送失败时是否额外发文字提示 |
+| `PARSEHUB_FILES_HOST` | 否 | 无 | 媒体中转服务对外地址，留空自动探测内网 IP |
+| `PARSEHUB_FILES_PORT` | 否 | `21473` | 媒体中转服务端口 |
+| `PARSEHUB_KEEP_MINUTES` | 否 | `30` | 临时文件保留分钟数 |
 
 > 列表类配置必须是合法 JSON，例如 `PARSEHUB_PROXY_PLATFORMS=["twitter", "youtube"]`。
 > 哪些群 / 私聊解析由命令 `解析开关` 控制（见下），没有对应的配置项。
 
-需要登录态的平台（知乎 / 小红书 / 微博类之外的 X、Instagram、TikTok、豆瓣、微信视频号 等），
-cookie 优先从 ParseHub 自己的配置读取（`ph set cookie <平台>`），也可以直接用 `PARSEHUB_COOKIE` 兜底。
+需要登录态的平台（X、Instagram、TikTok、豆瓣、微信视频号 等），cookie 优先从 ParseHub 自己的配置读取
+（`ph set cookie <平台>`），也可以直接用 `PARSEHUB_COOKIE` 兜底。
 
-## 使用
+## 🎉 使用
 
-- **自动**：群里发一条分享链接（或直接粘贴分享文案）即可
-- **命令**：
-  - `解析 <链接或分享文案>`（别名 `ph`、`解析链接`）
-  - `解析平台`（列出支持的平台）
-  - `解析开关 [开|关]` / `解析开` / `解析关` / `解析状态` —— 按会话开关解析
+### 指令表
+
+| 指令 | 权限 | 需要@ | 范围 | 说明 |
+| :---: | :---: | :---: | :---: | :--- |
+| `解析 <链接或分享文案>`（别名 `ph`、`解析链接`） | 群员 | 否 | 群聊/私聊 | 手动解析，不做去重拦截 |
+| `解析平台` | 群员 | 否 | 群聊/私聊 | 列出支持的平台 |
+| `解析开关 [开\|关]`、`解析开`、`解析关` | 主人/群管 | 否 | 群聊/私聊 | 按会话开关解析（私聊仅主人） |
+| `解析状态` | 群员 | 否 | 群聊/私聊 | 查看当前会话的开关状态 |
+
+### 触发规则
+
+- **自动**：群里发一条分享链接（或直接粘贴分享文案）即可，插件从文本里挑出受支持的链接
+- 一条消息最多处理 **3 个**链接
+- 会话被 `解析关` 关掉后，自动解析停止，手动 `解析` 也只对主人 / 群管理有效
+- 命令前缀支持空前缀与 `/`（`COMMAND_START` 需包含 `""`）
 
 ### 解析开关
 
@@ -114,7 +201,7 @@ cookie 优先从 ParseHub 自己的配置读取（`ph set cookie <平台>`），
   → 直接发缓存；**超过 24 小时** → 重新解析下载
 - 手动 `解析 <链接>` 同样吃缓存（只是不做去重拦截）
 
-## 说明
+### 说明
 
 - 视频走 `video` 消息段，被协议端拒绝时只回应失败表情，**不会**退回群文件
 - 媒体先落到本机临时目录，再通过内置的只读 HTTP 服务给协议端一个 `http://` 地址
@@ -126,7 +213,7 @@ cookie 优先从 ParseHub 自己的配置读取（`ph set cookie <平台>`），
 - 中文字体优先用 `PARSEHUB_CARD_FONT`，其次是插件缓存目录里的 `NotoSansSC.ttf`，
   再是系统字体，都没有才下载（首次下载约 18MB，之后走缓存）
 
-## 开发
+## 🛠️ 开发
 
 ```bash
 uv sync --all-groups            # 安装依赖（含测试）
@@ -156,6 +243,6 @@ uv run python live_check.py     # 真实链路自检（解析 → 下载 → 中
 - 中文文档字符串以「。」结尾，因此关闭 `D415`
 - 测试函数名本身就是说明，测试目录不强制文档字符串
 
-## 许可
+## 📄 许可
 
 [MIT](LICENSE) · 解析能力来自 [ParseHub](https://github.com/z-mio/ParseHub)
