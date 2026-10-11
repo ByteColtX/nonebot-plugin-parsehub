@@ -126,6 +126,32 @@ async def test_limit_zero_means_unlimited(
 
 
 @pytest.mark.asyncio
+async def test_cached_long_video_is_still_gated(
+    plugin, monkeypatch, tmp_media, core, card
+):
+    """缓存里存着加限制之前的旧条目，也要被时长上限拦住。"""
+    monkeypatch.setattr(plugin.plugin_config, "parsehub_max_seconds", 0)
+    calls = _wire(monkeypatch, core, card, tmp_media, duration=600)
+    first = FakeBot()
+    await plugin.handle_link(first, make_group_event(URL), URL)
+    assert calls["download"] == 1, "先按不限时长跑一次，把媒体写进缓存"
+
+    # 打开限制、换个群再来一次：缓存里有，但时长判断在缓存查询之前
+    monkeypatch.setattr(plugin.plugin_config, "parsehub_max_seconds", 300)
+    second = FakeBot()
+    await plugin.handle_link(
+        second, make_group_event(URL, group_id=654321), URL
+    )
+    assert "视频太长啦，还是去B 站看吧" in second.sent_texts, second.sent_texts
+    assert not any(
+        seg.type == "video"
+        for api, kw in second.calls
+        if api == "send_msg"
+        for seg in kw["message"]
+    ), "长视频不该从缓存里发出来"
+
+
+@pytest.mark.asyncio
 async def test_millisecond_platform_converts_before_checking(
     plugin, monkeypatch, tmp_media, core, card
 ):

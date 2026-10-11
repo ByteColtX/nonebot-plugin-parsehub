@@ -40,6 +40,9 @@ CAPTION_NAME = "caption.txt"
 # 换个写法再发会被当成新作品）。
 KEYS_NAME = "keys.txt"
 
+# 条目里媒体的时长（秒），供时长上限在命中缓存时判断，省得为已知的长视频再解析。
+SECONDS_NAME = "seconds.txt"
+
 # 媒体文件放在条目目录的这个子目录里，避免和卡片图混在一起。
 FILES_DIR_NAME = "files"
 
@@ -184,6 +187,24 @@ class MediaCache:
             return []
 
     @staticmethod
+    def entry_seconds(entry: Path) -> int:
+        """条目里媒体的时长（秒）。
+
+        Args:
+            entry: 条目目录。
+
+        Returns:
+            时长（秒）；没记录过或读不出来时返回 0（调用方按「不超限」处理）。
+        """
+        stored = entry / SECONDS_NAME
+        if not stored.is_file():
+            return 0
+        try:
+            return max(0, int(stored.read_text("utf-8").strip() or 0))
+        except (OSError, ValueError):
+            return 0
+
+    @staticmethod
     def remember_key(entry: Path, key: str) -> None:
         """把 key 补记到条目里（老条目没有 keys.txt，命中时顺手补上）。
 
@@ -220,6 +241,7 @@ class MediaCache:
         *,
         card: Path | None = None,
         caption: str = "",
+        seconds: int = 0,
     ) -> Path | None:
         """把一个作品存进缓存（多个 key 指向同一份文件）。
 
@@ -228,6 +250,7 @@ class MediaCache:
             files: 已下载到本地的媒体文件。
             card: 卡片图路径，没有就传 ``None``。
             caption: 没出卡时发的文字。
+            seconds: 媒体的时长（秒），0 表示未知。
 
         Returns:
             条目目录；没开启缓存或没有媒体时为 ``None``。
@@ -271,6 +294,11 @@ class MediaCache:
                 (primary / CAPTION_NAME).write_text(caption, "utf-8")
             except OSError as exc:
                 logger.warning(f"[parsehub] 缓存文字失败: {exc}")
+        if seconds > 0:
+            try:
+                (primary / SECONDS_NAME).write_text(str(int(seconds)), "utf-8")
+            except OSError as exc:
+                logger.warning(f"[parsehub] 缓存时长失败: {exc}")
         try:
             (primary / KEYS_NAME).write_text("\n".join(keys), "utf-8")
         except OSError as exc:

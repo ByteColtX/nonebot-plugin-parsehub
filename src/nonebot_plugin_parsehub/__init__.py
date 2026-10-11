@@ -630,8 +630,10 @@ async def _parse_and_send(
         DEDUPE.mark(session, pre_key)
 
     # 本地已经有这个作品的媒体就直接发，省掉解析、下载和画卡。
+    # 例外：缓存里记着这个作品超过时长上限（可能是加限制之前存进去的），那就
+    # 照常走解析，让后面的时长判断去发封面 + 提示，别从缓存里把长片发出去。
     cached = MEDIA_CACHE.get(pre_key)
-    if cached is not None:
+    if cached is not None and not _cached_over_limit(cached, cfg):
         _mark_cached_keys(session, cached, pre_key)
         await _send_cached(bot, event, cached, cfg)
         return
@@ -685,15 +687,8 @@ async def _parse_and_send(
             return
         DEDUPE.mark(session, post_key)
 
-    # 短链没命中缓存（缓存里记的是展开后的 key），解析完再查一次：命中就省掉下载
-    cached = MEDIA_CACHE.get(post_key)
-    if cached is not None:
-        _mark_cached_keys(session, cached, post_key)
-        await _send_cached(bot, event, cached, cfg)
-        return
-
     # 视频太长就只给封面 + 一句提示，别为几百 MB 的长片付下载和发送的代价。
-    # 判断放在缓存之前：缓存里可能存着加限制之前的旧条目。
+    # 判断放在缓存查询之前：缓存里可能存着加限制之前的旧条目，不该因此绕过限制。
     max_seconds = max(0, cfg.parsehub_max_seconds)
     seconds = card.video_seconds(result) if max_seconds else 0
     if max_seconds and seconds > max_seconds:
@@ -712,6 +707,13 @@ async def _parse_and_send(
             ),
         )
         await _react(bot, event, REACT_OK)
+        return
+
+    # 短链没命中缓存（缓存里记的是展开后的 key），解析完再查一次：命中就省掉下载
+    cached = MEDIA_CACHE.get(post_key)
+    if cached is not None:
+        _mark_cached_keys(session, cached, post_key)
+        await _send_cached(bot, event, cached, cfg)
         return
 
     if not result.media:
@@ -763,8 +765,28 @@ async def _parse_and_send(
         )
         # 存两份 key：短链那份让同一个短链下次直接命中，展开那份让别的写法也命中
         MEDIA_CACHE.store(
-            (pre_key, post_key), files, card=info.card, caption=info.caption
+            (pre_key, post_key),
+            files,
+            card=info.card,
+            caption=info.caption,
+            seconds=card.video_seconds(result),
         )
+
+
+def _cached_over_limit(entry: Path, cfg: Config) -> bool:
+    """缓存条目里记的时长是否超过上限。
+
+    Args:
+        entry: 缓存条目目录。
+        cfg: 当前插件配置。
+
+    Returns:
+        超过上限返回 True；没开时长限制或没记录时长时为 False。
+    """
+    limit = max(0, cfg.parsehub_max_seconds)
+    if not limit:
+        return False
+    return mediacache.MediaCache.entry_seconds(entry) > limit
 
 
 def _watch_name(result: object, display_name: str) -> str:
