@@ -103,6 +103,30 @@ _MAX_LINKS_PER_MESSAGE = 3
 # 临时文件清扫间隔（秒）。
 _SWEEP_INTERVAL_SECONDS = 300
 
+# 下载失败重试次数与间隔：CDN 偶发 403 / 超时靠重试能救回来（重试会重新解析，
+# 拿到的是新签名的地址）。
+_DOWNLOAD_ATTEMPTS = 3
+_DOWNLOAD_RETRY_DELAY = 1.5
+
+# ParseHub 的错误信息套了好几层「下载错误: 下载失败: …」，发给用户前压平。
+_ERROR_NOISE = ("下载错误", "下载失败", "解析错误", "下载超时")
+
+
+def _short_error(exc: BaseException) -> str:
+    """把 ParseHub 的嵌套错误信息压成一句人话。
+
+    Args:
+        exc: 捕获到的异常。
+
+    Returns:
+        去掉重复前缀后的错误描述。
+    """
+    text = str(exc).strip()
+    for word in _ERROR_NOISE:
+        text = text.replace(f"{word}: ", "").replace(f"{word}：", "")
+    return text.strip() or type(exc).__name__
+
+
 # 命令触发时用来跳过自动解析的前缀。
 _COMMAND_PREFIXES = ("解析", "ph", "/解析", "/ph")
 
@@ -703,20 +727,27 @@ async def _download_task(
     Returns:
         ``(任务目录, 本地文件列表)``；下载失败时为 ``None``。
     """
-    task_dir = server.RELAY.new_task_dir()
-    try:
-        downloaded = await asyncio.wait_for(
-            core.CLIENT.download(url, str(task_dir), proxy, cookie),
-            cfg.parsehub_timeout,
-        )
-    except Exception as exc:  # noqa: BLE001 - 下载失败原因很多，统一兜底
-        logger.warning(
-            f"[parsehub] 下载失败 {url}: {type(exc).__name__}: {exc}"
-        )
-        await _send(bot, event, Message(f"下载失败：{exc}"))
-        return None
-
-    return task_dir, await _collect_local_files(downloaded)
+    # 平台 CDN 偶发 403 / 超时（签名地址过期、冷节点、限流），重试会重新解析拿到
+    # 新地址，多数情况下就过了。
+    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+        task_dir = server.RELAY.new_task_dir()
+        try:
+            downloaded = await asyncio.wait_for(
+                core.CLIENT.download(url, str(task_dir), proxy, cookie),
+                cfg.parsehub_timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 - 下载失败原因很多，统一兜底
+            logger.warning(
+                f"[parsehub] 下载失败（第 {attempt}/{_DOWNLOAD_ATTEMPTS} 次）"
+                f" {url}: {type(exc).__name__}: {exc}"
+            )
+            if attempt < _DOWNLOAD_ATTEMPTS:
+                await asyncio.sleep(_DOWNLOAD_RETRY_DELAY)
+                continue
+            await _send(bot, event, Message(f"下载失败：{_short_error(exc)}"))
+            return None
+        return task_dir, await _collect_local_files(downloaded)
+    return None
 
 
 async def _render_card(

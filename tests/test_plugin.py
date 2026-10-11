@@ -583,6 +583,77 @@ async def test_cache_off_still_parses_and_downloads(
     assert calls == {"parse": 2, "download": 2}
 
 
+def test_short_error_strips_nested_prefixes(plugin):
+    """ParseHub 的错误信息套好几层，发给群之前要压平。"""
+    exc = RuntimeError("下载错误: 下载失败: 下载错误: HTTP错误: 403")
+    assert plugin._short_error(exc) == "HTTP错误: 403"
+    assert plugin._short_error(RuntimeError("")) == "RuntimeError"
+
+
+def _patch_failing_download(core, monkeypatch, tmp_media, calls, failures):
+    """造一个「前 N 次失败、之后成功」的下载。"""
+    img = tmp_media / "pic.jpg"
+    img.write_bytes(b"x" * 1024)
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(
+            media=FakeMediaRef("https://cdn.example.com/pic.jpg", "jpg")
+        )
+
+    async def fake_download(url, path, proxy="", cookie=""):
+        calls["download"] += 1
+        if calls["download"] <= failures:
+            raise RuntimeError("下载错误: 下载失败: 下载错误: HTTP错误: 403")
+        return FakeDownloadResult([img])
+
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+    monkeypatch.setattr(core.CLIENT, "download", fake_download)
+    monkeypatch.setattr(
+        core,
+        "probe_size",
+        lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
+    )
+
+
+@pytest.mark.asyncio
+async def test_download_retries_transient_cdn_error(
+    plugin, monkeypatch, tmp_media, core
+):
+    """CDN 偶发 403：重试一次就成功，媒体照样发出去。"""
+    calls = {"download": 0}
+    _patch_failing_download(core, monkeypatch, tmp_media, calls, failures=1)
+    monkeypatch.setattr(plugin, "_DOWNLOAD_RETRY_DELAY", 0)
+
+    bot = FakeBot()
+    url = "https://b23.tv/abcd"
+    await plugin.handle_link(bot, make_group_event(url), url)
+
+    assert calls["download"] == 2, "第一次 403 之后应该重试"
+    assert [api for api, _ in bot.calls].count("send_msg") > 0
+    assert not any("403" in text for text in bot.sent_texts), bot.sent_texts
+
+
+@pytest.mark.asyncio
+async def test_download_failure_after_retries_reports_short_error(
+    plugin, monkeypatch, tmp_media, core
+):
+    """一直失败：重试到上限后只发一条压平过的错误。"""
+    calls = {"download": 0}
+    _patch_failing_download(core, monkeypatch, tmp_media, calls, failures=99)
+    monkeypatch.setattr(plugin, "_DOWNLOAD_RETRY_DELAY", 0)
+
+    bot = FakeBot()
+    url = "https://b23.tv/abcd"
+    await plugin.handle_link(bot, make_group_event(url), url)
+
+    assert calls["download"] == plugin._DOWNLOAD_ATTEMPTS
+    texts = [text for text in bot.sent_texts if text]
+    assert texts == ["下载失败：HTTP错误: 403"], texts
+
+
 @pytest.mark.asyncio
 async def test_handle_link_live_photo_sends_image_and_video(
     plugin, monkeypatch, tmp_media, core
