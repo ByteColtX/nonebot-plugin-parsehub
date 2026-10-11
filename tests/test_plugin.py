@@ -266,6 +266,11 @@ def test_content_key_normalises_platform_ids(plugin, core):
         == "douyin:7695216850086505892"
     )
     assert core.content_key(share.rstrip("/")) == core.content_key(share)
+    # ParseHub 给 douyin 的 raw_url 两种形态都出现过，必须归一成同一个
+    assert (
+        core.content_key("https://www.douyin.com/video/7695216850086505892")
+        == "douyin:7695216850086505892"
+    )
 
     # B 站：移动端 / 带一堆追踪参数 / 末尾斜杠，都是同一个视频
     bv = core.content_key("https://www.bilibili.com/video/BV1yupv6YEuE/")
