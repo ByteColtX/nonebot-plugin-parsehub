@@ -1,0 +1,35 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: 安装依赖
+        run: uv sync --all-groups
+      - name: 跑测试
+        run: uv run pytest -q
+      - name: 代码检查
+        run: uv run ruff check . && uv run ruff format --check .
+
+  publish:
+    name: Build and publish
+    needs: test
+    runs-on: ubuntu-latest
+    # 环境名要和 PyPI Trusted Publisher 表单里填的 Environment name 一致
+    environment: pypi
+    permissions:
+      id-token: write # PyPI Trusted Publishing（OIDC 换一次性 token，不需要 API token）
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: 构建 sdist + wheel
+        run: uv build
+      - name: 发布到 PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
