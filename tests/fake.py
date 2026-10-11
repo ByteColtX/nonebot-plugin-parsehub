@@ -19,6 +19,7 @@ def make_group_event(
     group_id: int = 123456,
     user_id: int = 20000,
     message_id: int = 1,
+    role: str = "member",
 ) -> GroupMessageEventV11:
     """构造一条群消息事件。"""
     from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message
@@ -37,7 +38,7 @@ def make_group_event(
         raw_message=text,
         font=0,
         sender=Sender(
-            user_id=user_id, nickname="tester", card="", role="member", title=""
+            user_id=user_id, nickname="tester", card="", role=role, title=""
         ),
     )
 

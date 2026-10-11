@@ -41,7 +41,7 @@ from nonebot.rule import Rule
 
 # 包内用相对导入：插件既可能作为已安装的包加载，也可能作为本地插件被放在
 # src/plugins 下（此时模块名带前缀），绝对自引用在后一种情况下会失败。
-from . import card, core, server
+from . import card, core, server, switches
 from .config import Config, plugin_config
 
 __plugin_meta__ = PluginMetadata(
@@ -50,7 +50,10 @@ __plugin_meta__ = PluginMetadata(
         "群里出现受支持的分享链接时，用 ParseHub 自动解析并发送媒体"
         "（视频 / 图集 / 正文）。"
     ),
-    usage="发链接即可自动解析；也可用命令：解析 <链接或分享文案>、解析平台",
+    usage=(
+        "发链接即可自动解析；命令：解析 <链接或分享文案>、解析平台、"
+        "解析开关 [开|关]（超管 / 群管理）、解析状态"
+    ),
     type="application",
     homepage="https://github.com/ByteColtX/nonebot-plugin-parsehub",
     config=Config,
@@ -109,6 +112,14 @@ _BYTES_PER_MEGABYTE = 1024 * 1024
 
 # 去重缓存：同一链接在窗口期内只解析一次。
 DEDUPE = core.DedupeCache()
+
+# 按会话（群 / 私聊）记录的解析开关，落在插件数据目录里。
+SWITCHES = switches.SwitchStore(server.data_root() / "sessions.json")
+
+# 「解析开关」命令能接受的参数写法。
+_ON_WORDS = frozenset({"开", "开启", "打开", "on", "true", "1"})
+_OFF_WORDS = frozenset({"关", "关闭", "关上", "off", "false", "0"})
+_STATUS_WORDS = frozenset({"状态", "status"})
 
 
 @dataclass
@@ -748,6 +759,71 @@ async def _send_card_or_text(
     return False
 
 
+def _session_key(event: MessageEvent) -> str:
+    """取这条消息所属的会话键。
+
+    Args:
+        event: 消息事件。
+
+    Returns:
+        :mod:`switches` 里的会话键（群按群号，私聊按对方 QQ）。
+    """
+    if isinstance(event, GroupMessageEvent):
+        return switches.group_key(event.group_id)
+    return switches.private_key(int(event.get_user_id()))
+
+
+def _session_name(event: MessageEvent) -> str:
+    """给用户看的会话称呼。
+
+    Args:
+        event: 消息事件。
+
+    Returns:
+        ``本群`` 或 ``本会话``。
+    """
+    return "本群" if isinstance(event, GroupMessageEvent) else "本会话"
+
+
+def _is_superuser(event: MessageEvent) -> bool:
+    """发消息的人是不是 NoneBot 超管。
+
+    Args:
+        event: 消息事件。
+
+    Returns:
+        在 ``SUPERUSERS`` 名单里为 ``True``。
+    """
+    return event.get_user_id() in get_driver().config.superusers
+
+
+def _is_group_admin(event: MessageEvent) -> bool:
+    """发消息的人是不是本群群主或管理员。
+
+    Args:
+        event: 消息事件。
+
+    Returns:
+        群主 / 管理员为 ``True``；私聊永远是 ``False``。
+    """
+    return isinstance(event, GroupMessageEvent) and event.sender.role in (
+        "owner",
+        "admin",
+    )
+
+
+def _can_control(event: MessageEvent) -> bool:
+    """有没有权限操作解析开关。
+
+    Args:
+        event: 消息事件。
+
+    Returns:
+        超管或群管理为 ``True``。
+    """
+    return _is_superuser(event) or _is_group_admin(event)
+
+
 async def _auto_rule(event: MessageEvent) -> bool:
     """判断是否应该自动解析这条消息。
 
@@ -768,6 +844,8 @@ async def _auto_rule(event: MessageEvent) -> bool:
         and event.group_id not in cfg.parsehub_groups
     ):
         return False
+    if not SWITCHES.is_on(_session_key(event)):
+        return False  # 这个会话被关掉了
 
     text = event.get_plaintext()
     if text.lstrip().startswith(_COMMAND_PREFIXES):
@@ -789,6 +867,12 @@ platform_cmd = on_command(
     priority=10,
     block=True,
 )
+switch_cmd = on_command(
+    "解析开关",
+    aliases={"解析开", "解析关", "解析状态"},
+    priority=10,
+    block=True,
+)
 
 
 @parse_cmd.handle()
@@ -804,6 +888,11 @@ async def _handle_parse_cmd(
         event: 触发消息事件。
         args: 命令后面的参数。
     """
+    if not SWITCHES.is_on(_session_key(event)) and not _can_control(event):
+        await parse_cmd.finish(
+            f"{_session_name(event)}的解析已关闭，"
+            "只有超管或群管理员能手动解析。"
+        )
     text = args.extract_plain_text().strip() or event.get_plaintext()
     urls = core.extract_urls(text)
     if not urls:
@@ -822,6 +911,57 @@ async def _handle_platform_cmd() -> None:
     names = "、".join(f"{item['name']}({item['id']})" for item in platforms)
     await platform_cmd.finish(
         f"ParseHub 支持 {len(platforms)} 个平台：\n{names}"
+    )
+
+
+@switch_cmd.handle()
+async def _handle_switch_cmd(
+    event: MessageEvent,
+    args: Message = CommandArg(),
+) -> None:
+    """处理 ``解析开关`` / ``解析开`` / ``解析关`` / ``解析状态``。
+
+    查看状态谁都可以；改开关只允许超管和本群管理员。
+
+    Args:
+        event: 触发消息事件。
+        args: 命令后面的参数。
+    """
+    key = _session_key(event)
+    raw = event.get_plaintext().strip()
+    head = raw.split(maxsplit=1)[0].lstrip("/#") if raw else ""
+    arg = args.extract_plain_text().strip().lower()
+
+    if head == "解析状态" or arg in _STATUS_WORDS:
+        state = "开启" if SWITCHES.is_on(key) else "关闭"
+        await switch_cmd.finish(f"{_session_name(event)}的解析当前是：{state}")
+
+    if not _can_control(event):
+        await switch_cmd.finish("只有超管或本群管理员能改解析开关。")
+
+    if head == "解析开" or arg in _ON_WORDS:
+        want = True
+    elif head == "解析关" or arg in _OFF_WORDS:
+        want = False
+    elif arg:
+        await switch_cmd.finish(
+            "用法：解析开关 [开|关]，不带参数就翻转；解析状态 看当前值"
+        )
+        return
+    else:
+        want = not SWITCHES.is_on(key)
+
+    SWITCHES.set(key, want)
+    name = _session_name(event)
+    logger.info(
+        f"[parsehub] {name}解析开关 -> {'开' if want else '关'}"
+        f"（{key}，操作人 {event.get_user_id()}）"
+    )
+    if want:
+        await switch_cmd.finish(f"已开启{name}的解析。")
+    await switch_cmd.finish(
+        f"已关闭{name}的解析：链接不再自动解析，"
+        "手动解析也只有超管和群管理员能用。"
     )
 
 

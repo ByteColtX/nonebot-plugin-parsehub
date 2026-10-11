@@ -73,6 +73,29 @@ def cache_root() -> Path:
     return _resolve_root()
 
 
+def data_root() -> Path:
+    """返回插件数据目录（需要长期保留的东西放这儿）。
+
+    和 :func:`cache_root` 分开：缓存目录里的任务子目录会被定期清扫，开关状态、
+    配置这类东西不能放进去。
+
+    Returns:
+        数据目录。
+    """
+    try:
+        require("nonebot_plugin_localstore")
+
+        import nonebot_plugin_localstore as store
+
+        return store.get_plugin_data_dir()
+    except Exception:  # noqa: BLE001 - 缺少依赖时降级，不能让插件整体挂掉
+        logger.warning(
+            "[parsehub] 未安装 nonebot-plugin-localstore，"
+            "插件数据改用系统临时目录（重启会丢）"
+        )
+        return Path(tempfile.gettempdir()) / "nonebot-plugin-parsehub-data"
+
+
 class _RelayHandler(http.server.SimpleHTTPRequestHandler):
     """只读静态文件服务，关掉目录列表和访问日志。"""
 

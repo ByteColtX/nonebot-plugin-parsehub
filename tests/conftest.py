@@ -59,6 +59,22 @@ def card(plugin):
     return plugin.card
 
 
+@pytest.fixture(scope="session")
+def switches(plugin):
+    """插件的 switches 子模块（同样要等 nonebot 初始化）。"""
+    return plugin.switches
+
+
+@pytest.fixture(autouse=True)
+def _clean_switches(plugin, monkeypatch, tmp_path):
+    """每个测试用一份独立的解析开关，避免用例之间互相影响。"""
+    monkeypatch.setattr(
+        plugin,
+        "SWITCHES",
+        plugin.switches.SwitchStore(tmp_path / "sessions.json"),
+    )
+
+
 @pytest.fixture(autouse=True)
 def _offline_card(card, monkeypatch):
     """卡片模块在测试里一律不联网。
