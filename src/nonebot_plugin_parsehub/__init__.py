@@ -40,7 +40,7 @@ from nonebot.rule import Rule
 
 # 包内用相对导入：插件既可能作为已安装的包加载，也可能作为本地插件被放在
 # src/plugins 下（此时模块名带前缀），绝对自引用在后一种情况下会失败。
-from . import core, server
+from . import card, core, server
 from .config import Config, plugin_config
 
 __plugin_meta__ = PluginMetadata(
@@ -524,10 +524,11 @@ async def _parse_and_send(
     title = result.title or "(无标题)"
     logger.info(f"[parsehub] {display_name} 解析成功: {url} -> {title}")
 
-    if cfg.parsehub_send_text:
-        await _send(bot, event, _build_caption(result, display_name, cfg))
-
     if not result.media:
+        # 纯文字帖（比如 B 站动态）：没有媒体，只发卡片或文字
+        await _send_card_or_text(
+            bot, event, result, display_name, [], None, cfg
+        )
         return
 
     media_list = (
@@ -548,7 +549,21 @@ async def _parse_and_send(
             )
             return
 
-    await _download_and_send(bot, event, url, proxy, cookie, cfg)
+    downloaded = await _download_task(bot, event, url, proxy, cookie, cfg)
+    if downloaded is None:
+        return
+    task_dir, files = downloaded
+
+    # 卡片先发（信息卡），媒体随后
+    await _send_card_or_text(
+        bot, event, result, display_name, files, task_dir, cfg
+    )
+    if files:
+        await _send_media_files(bot, event, files)
+        logger.info(
+            f"[parsehub] 已发送 {len(files)} 个文件，"
+            f"临时目录 {task_dir}（稍后自动清理）"
+        )
 
 
 def _build_caption(result: object, display_name: str, cfg: Config) -> Message:
@@ -596,15 +611,15 @@ async def _oversized_size(media: object, proxy: str) -> int | None:
     return size
 
 
-async def _download_and_send(
+async def _download_task(
     bot: Bot,
     event: MessageEvent,
     url: str,
     proxy: str,
     cookie: str,
     cfg: Config,
-) -> None:
-    """下载媒体并发送出去。
+) -> tuple[Path, list[Path]] | None:
+    """下载媒体到新的任务目录。
 
     Args:
         bot: 当前 Bot 实例。
@@ -613,6 +628,9 @@ async def _download_and_send(
         proxy: 解析与下载代理。
         cookie: 登录态 cookie。
         cfg: 当前插件配置。
+
+    Returns:
+        ``(任务目录, 本地文件列表)``；下载失败时为 ``None``。
     """
     task_dir = server.RELAY.new_task_dir()
     try:
@@ -625,19 +643,82 @@ async def _download_and_send(
             f"[parsehub] 下载失败 {url}: {type(exc).__name__}: {exc}"
         )
         await _send(bot, event, Message(f"下载失败：{exc}"))
-        return
+        return None
 
-    files = await _collect_local_files(downloaded)
-    if not files:
-        return
+    return task_dir, await _collect_local_files(downloaded)
 
+
+async def _render_card(
+    result: object,
+    files: list[Path],
+    task_dir: Path | None,
+    cfg: Config,
+) -> Path | None:
+    """渲染卡片图（阻塞活走线程池）。
+
+    Args:
+        result: ParseHub 解析结果。
+        files: 已下载的本地媒体，抽帧兜底要用。
+        task_dir: 任务目录；为 ``None`` 时另建一个。
+        cfg: 当前插件配置。
+
+    Returns:
+        卡片图片路径；不可用时为 ``None``（调用方退回文字）。
+    """
     try:
-        await _send_media_files(bot, event, files)
-    finally:
-        logger.info(
-            f"[parsehub] 已发送 {len(files)} 个文件，"
-            f"临时目录 {task_dir}（稍后自动清理）"
+        font = await asyncio.to_thread(
+            card.ensure_font,
+            server.cache_root(),
+            cfg.parsehub_card_font_url,
         )
+        if font is None:
+            return None
+        cover = await asyncio.to_thread(card.fetch_cover, result, files)
+        if cover is None:
+            logger.info("[parsehub] 没有可用封面，卡片跳过")
+            return None
+        target_dir = task_dir or server.RELAY.new_task_dir()
+        out_path = target_dir / "card.jpg"
+        await asyncio.to_thread(card.render, result, cover, out_path)
+    except Exception as exc:  # noqa: BLE001 - 渲染失败不能让解析白做
+        logger.warning(f"[parsehub] 卡片渲染失败: {type(exc).__name__}: {exc}")
+        return None
+    return out_path
+
+
+async def _send_card_or_text(
+    bot: Bot,
+    event: MessageEvent,
+    result: object,
+    display_name: str,
+    files: list[Path],
+    task_dir: Path | None,
+    cfg: Config,
+) -> None:
+    """优先发卡片图，卡片不可用时退回文字。
+
+    Args:
+        bot: 当前 Bot 实例。
+        event: 触发消息事件。
+        result: ParseHub 解析结果。
+        display_name: 平台中文名。
+        files: 已下载的本地媒体。
+        task_dir: 任务目录。
+        cfg: 当前插件配置。
+    """
+    if cfg.parsehub_card:
+        out_path = await _render_card(result, files, task_dir, cfg)
+        if out_path is not None:
+            url = server.RELAY.url_for(out_path, _ENDPOINT.host, _ENDPOINT.port)
+            try:
+                await bot.send(event, MessageSegment.image(file=url))
+                return
+            except Exception as exc:  # noqa: BLE001 - 发图失败就退回文字
+                logger.warning(
+                    f"[parsehub] 卡片发送失败: {type(exc).__name__}: {exc}"
+                )
+    if cfg.parsehub_send_text:
+        await _send(bot, event, _build_caption(result, display_name, cfg))
 
 
 async def _auto_rule(event: MessageEvent) -> bool:
@@ -748,6 +829,15 @@ async def _on_startup() -> None:
         f"http://{_ENDPOINT.host}:{_ENDPOINT.port}/  "
         f"根目录: {server.RELAY.root}"
     )
+    if cfg.parsehub_card and cfg.parsehub_card_font:
+        font_path = Path(cfg.parsehub_card_font).expanduser()
+        if font_path.exists():
+            card.set_font(font_path)
+            logger.info(f"[parsehub] 卡片字体: {font_path}")
+        else:
+            logger.warning(
+                f"[parsehub] 配置的字体不存在: {font_path}，改用自动查找"
+            )
     asyncio.create_task(_sweep_expired_media())
 
 

@@ -13,6 +13,7 @@
 - **自动解析**：群消息里出现受支持的链接时自动处理，也可用命令手动触发
 - **24 个平台**：Bilibili、抖音、小红书、微博、快手、知乎、贴吧、豆瓣、今日头条、微信公众号、微信视频号、酷安、皮皮虾、最右、小黑盒、Bangumi、X/Twitter、Instagram、YouTube、TikTok、Threads、Facebook、Snapchat、Medium
 - **多媒体合并转发**：一个帖子有 2 个以上媒体时合并成一条转发消息（标题那条文字不算）
+- **信息卡片**：先发一张 App Store「Today」风格的信息卡（封面铺满 + 底部渐变 + 标题 / 时长），再发媒体
 - **实况照片**：图片 + 短视频一起发
 - **视频消息段**：直接发视频，不占用群文件
 - **表情回应**：不引用原消息，改为给触发消息点表情（收到 / 成功 / 失败）
@@ -44,6 +45,9 @@ pip install nonebot-plugin-parsehub
 | `PARSEHUB_AUTO_PRIVATE` | bool | `false` | 私聊也自动解析 |
 | `PARSEHUB_MAX_MB` | int | `100` | 单个媒体文件体积上限，超过直接跳过 |
 | `PARSEHUB_VIDEO_SEND` | str | `video` | `video` = 用视频消息段；`file` = 上传群文件 |
+| `PARSEHUB_CARD` | bool | `true` | 是否发信息卡片图（失败自动退回文字） |
+| `PARSEHUB_CARD_FONT` | str | 空 | 中文字体路径，留空则自动找系统字体 / 下载 |
+| `PARSEHUB_CARD_FONT_URL` | str | 空 | 字体下载地址，留空用内置镜像 |
 | `PARSEHUB_SEND_TEXT` | bool | `true` | 是否发送标题 / 正文 |
 | `PARSEHUB_MAX_CHARS` | int | `300` | 正文最多发送多少字符 |
 | `PARSEHUB_FAIL_NOTICE` | bool | `true` | 视频发送失败时是否额外发文字提示 |
@@ -74,6 +78,10 @@ cookie 优先从 ParseHub 自己的配置读取（`ph set cookie <平台>`），
   （协议端常在另一台机器上，读不到本机 `file://` 路径），过期自动清理
 - parsehub 全程是同步阻塞的，插件把所有调用放进 `asyncio.to_thread`，不会阻塞事件循环
 - 解析器首次导入需要几秒（numpy + opencv），插件采用懒加载，不影响机器人启动
+- 信息卡片用 Pillow 画，封面三级兜底：`thumb_url` → 本身就是图片的媒体 → 本地视频抽首帧；
+  渲染走 `asyncio.to_thread`（armv7 上单张约 0.3s），没装 Pillow 或没有中文字体时自动退回纯文字
+- 中文字体优先用 `PARSEHUB_CARD_FONT`，其次是插件缓存目录里的 `NotoSansSC.ttf`，
+  再是系统字体，都没有才下载（首次下载约 18MB，之后走缓存）
 
 ## 开发
 

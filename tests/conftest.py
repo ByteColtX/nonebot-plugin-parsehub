@@ -47,3 +47,9 @@ def core(plugin):
 def server(plugin):
     """插件的 server 子模块。"""
     return plugin.server
+
+
+@pytest.fixture(scope="session")
+def card(plugin):
+    """插件的 card 子模块（必须在 nonebot 初始化之后才 import）。"""
+    return plugin.card

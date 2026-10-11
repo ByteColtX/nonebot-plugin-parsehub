@@ -64,6 +64,15 @@ def _resolve_root() -> Path:
         return Path(tempfile.gettempdir()) / "nonebot-plugin-parsehub"
 
 
+def cache_root() -> Path:
+    """返回插件缓存根目录（媒体与字体都放这儿）。
+
+    Returns:
+        缓存根目录。
+    """
+    return _resolve_root()
+
+
 class _RelayHandler(http.server.SimpleHTTPRequestHandler):
     """只读静态文件服务，关掉目录列表和访问日志。"""
 

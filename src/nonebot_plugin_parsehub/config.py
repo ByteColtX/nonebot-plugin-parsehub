@@ -45,6 +45,9 @@ class Config(BaseModel):
         parsehub_max_mb: 单个媒体文件体积上限（MB），超过则跳过。
         parsehub_video_send: 视频发送方式，``video`` 用视频消息段，``file``
             上传群文件。
+        parsehub_card: 是否把解析结果画成卡片图发送（失败自动退回文字）。
+        parsehub_card_font: 中文字体文件路径，留空则自动找系统字体或下载。
+        parsehub_card_font_url: 字体下载地址，留空则用内置的几个镜像。
         parsehub_send_text: 是否发送标题与正文文字。
         parsehub_max_chars: 正文最多发送的字符数。
         parsehub_fail_notice: 视频发送失败时是否额外发一条文字提示。
@@ -71,6 +74,9 @@ class Config(BaseModel):
 
     # ---- 发送 ----
     parsehub_video_send: str = "video"
+    parsehub_card: bool = True
+    parsehub_card_font: str = ""
+    parsehub_card_font_url: str = ""
     parsehub_send_text: bool = True
     parsehub_max_chars: int = 300
     parsehub_fail_notice: bool = True
