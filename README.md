@@ -42,14 +42,10 @@ pip install nonebot-plugin-parsehub
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `PARSEHUB_AUTO` | bool | `true` | 群里出现链接时自动解析 |
-| `PARSEHUB_GROUPS` | list[int] | `[]` | 自动解析生效的群号，留空 = 所有群 |
-| `PARSEHUB_AUTO_PRIVATE` | bool | `false` | 私聊也自动解析 |
+| `PARSEHUB_AUTO` | bool | `true` | 群里出现链接时自动解析（总开关） |
 | `PARSEHUB_MAX_MB` | int | `100` | 单个媒体文件体积上限，超过直接跳过 |
-| `PARSEHUB_VIDEO_SEND` | str | `video` | `video` = 用视频消息段；`file` = 上传群文件 |
 | `PARSEHUB_CARD` | bool | `true` | 是否发信息卡片图（失败自动退回文字） |
 | `PARSEHUB_CARD_FONT` | str | 空 | 中文字体路径，留空则自动找系统字体 / 下载 |
-| `PARSEHUB_CARD_FONT_URL` | str | 空 | 字体下载地址，留空用内置镜像 |
 | `PARSEHUB_FORWARD_TIMEOUT` | int | `60` | 合并转发等协议端的秒数，超时才逐条发 |
 | `PARSEHUB_SEND_TEXT` | bool | `true` | 是否发送标题 / 正文 |
 | `PARSEHUB_MAX_CHARS` | int | `300` | 正文最多发送多少字符 |
@@ -59,12 +55,12 @@ pip install nonebot-plugin-parsehub
 | `PARSEHUB_COOKIE` | str | 空 | 兜底 cookie（优先读 parsehub 自己的 cookies.toml） |
 | `PARSEHUB_TIMEOUT` | int | `180` | 解析 + 下载总超时（秒） |
 | `PARSEHUB_FILES_HOST` | str | 空 | 媒体中转服务对外地址，留空自动探测内网 IP |
-| `PARSEHUB_FILES_PORT` | int | `8899` | 媒体中转服务端口 |
+| `PARSEHUB_FILES_PORT` | int | `21473` | 媒体中转服务端口 |
 | `PARSEHUB_KEEP_MINUTES` | int | `30` | 临时文件保留分钟数 |
 | `PARSEHUB_CONCURRENCY` | int | `2` | 同时处理的任务数 |
-| `PARSEHUB_DEDUPE_SECONDS` | int | `120` | 同一链接去重窗口（秒） |
 
-> 列表类配置必须是合法 JSON，例如 `PARSEHUB_GROUPS=[123456]`、`PARSEHUB_PROXY_PLATFORMS=["twitter", "youtube"]`。
+> 列表类配置必须是合法 JSON，例如 `PARSEHUB_PROXY_PLATFORMS=["twitter", "youtube"]`。
+> 哪些群 / 私聊解析由命令 `解析开关` 控制（见下），没有对应的配置项。
 
 需要登录态的平台（知乎 / 小红书 / 微博类之外的 X、Instagram、TikTok、豆瓣、微信视频号 等），
 cookie 优先从 ParseHub 自己的配置读取（`ph set cookie <平台>`），也可以直接用 `PARSEHUB_COOKIE` 兜底。
@@ -81,11 +77,12 @@ cookie 优先从 ParseHub 自己的配置读取（`ph set cookie <平台>`），
 
 以**会话**为维度（群按群号，私聊按对方 QQ），只影响该会话：
 
+- **默认值**：群**默认开**（跟以前一样自动解析）；私聊**默认关**，要超管 `解析开` 才解析
 - 关掉之后：该会话里的链接**不再自动解析**；手动 `解析` 也只有超管和群管理能用
 - **谁能操作**：`SUPERUSERS` 里的超管，以及群主 / 群管理员（私聊只有超管）
 - **谁能看状态**：所有人（`解析状态`）
 - 状态存在插件数据目录的 `sessions.json`（`nonebot-plugin-localstore` 的 data dir），
-  只记录被显式改过的会话，没记录的一律按「开」处理
+  只记录和默认值不同的会话（关掉的群、打开的私聊），文件一直很小
 
 ## 说明
 

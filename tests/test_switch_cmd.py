@@ -77,27 +77,27 @@ async def test_owner_can_switch(app: App, plugin) -> None:
 
 
 @pytest.mark.asyncio
-async def test_superuser_can_switch_private(app: App, plugin) -> None:
-    """私聊里只有超管能操作，关掉的是这个私聊会话。"""
-    event = make_private_event("解析关", user_id=SUPERUSER_ID, message_id=105)
-    await _send(
-        app,
-        plugin,
-        event,
-        "已关闭本会话的解析：链接不再自动解析，手动解析也只有超管和群管理员能用。",
-    )
+async def test_superuser_can_enable_private(app: App, plugin) -> None:
+    """私聊默认关，超管可以用「解析开」给某个私聊单独打开。"""
     assert (
         plugin.SWITCHES.is_on(plugin.switches.private_key(SUPERUSER_ID))
         is False
+    )
+    event = make_private_event("解析开", user_id=SUPERUSER_ID, message_id=105)
+    await _send(app, plugin, event, "已开启本会话的解析。")
+    assert (
+        plugin.SWITCHES.is_on(plugin.switches.private_key(SUPERUSER_ID)) is True
     )
 
 
 @pytest.mark.asyncio
 async def test_member_cannot_switch_private(app: App, plugin) -> None:
-    """私聊里普通成员也不行（私聊没有群管理这一说）。"""
-    event = make_private_event("解析关", user_id=MEMBER_ID, message_id=113)
+    """私聊里普通成员不行（私聊没有群管理这一说），状态也不变。"""
+    event = make_private_event("解析开", user_id=MEMBER_ID, message_id=113)
     await _send(app, plugin, event, "只有超管或本群管理员能改解析开关。")
-    assert plugin.SWITCHES.is_on(plugin.switches.private_key(MEMBER_ID)) is True
+    assert (
+        plugin.SWITCHES.is_on(plugin.switches.private_key(MEMBER_ID)) is False
+    )
 
 
 @pytest.mark.asyncio
@@ -155,6 +155,15 @@ async def test_auto_rule_unaffected_in_other_group(plugin) -> None:
 async def test_auto_rule_default_on(plugin) -> None:
     """没动过开关的群默认还是解析。"""
     event = make_group_event("https://b23.tv/ZlF8X92")
+    assert await plugin._auto_rule(event) is True
+
+
+@pytest.mark.asyncio
+async def test_private_auto_rule_off_until_enabled(plugin) -> None:
+    """私聊默认不自动解析，超管「解析开」之后才解析。"""
+    event = make_private_event("https://b23.tv/ZlF8X92", user_id=MEMBER_ID)
+    assert await plugin._auto_rule(event) is False
+    plugin.SWITCHES.set(plugin.switches.private_key(MEMBER_ID), True)
     assert await plugin._auto_rule(event) is True
 
 

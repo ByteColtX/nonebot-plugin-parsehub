@@ -32,7 +32,6 @@ from nonebot.adapters.onebot.v11 import (
     Message,
     MessageEvent,
     MessageSegment,
-    PrivateMessageEvent,
 )
 from nonebot.adapters.onebot.v11.exception import ActionFailed
 from nonebot.params import CommandArg
@@ -103,6 +102,9 @@ _MAX_LINKS_PER_MESSAGE = 3
 
 # 临时文件清扫间隔（秒）。
 _SWEEP_INTERVAL_SECONDS = 300
+
+# 同一链接的去重窗口（秒）：同一条消息里重复出现的链接只解析一次。
+_DEDUPE_SECONDS = 120
 
 # 命令触发时用来跳过自动解析的前缀。
 _COMMAND_PREFIXES = ("解析", "ph", "/解析", "/ph")
@@ -276,23 +278,17 @@ async def _send_video(
     url: str,
     name: str,
 ) -> bool:
-    """发送视频。
-
-    默认只用 video 消息段；只有显式配置成 ``file`` 时才走文件上传。
+    """用 video 消息段发送视频（不占群文件）。
 
     Args:
         bot: 当前 Bot 实例。
         event: 触发消息事件。
         url: 协议端可下载的地址。
-        name: 展示用的文件名。
+        name: 展示用的文件名，仅用于日志。
 
     Returns:
         发送成功返回 True。
     """
-    mode = (plugin_config.parsehub_video_send or "video").lower()
-    if mode == "file":
-        return await _send_file(bot, event, url, name)
-
     try:
         await bot.send(event, MessageSegment.video(file=url))
     except ActionFailed as exc:
@@ -695,11 +691,7 @@ async def _render_card(
         卡片图片路径；不可用时为 ``None``（调用方退回文字）。
     """
     try:
-        font = await asyncio.to_thread(
-            card.ensure_font,
-            server.cache_root(),
-            cfg.parsehub_card_font_url,
-        )
+        font = await asyncio.to_thread(card.ensure_font, server.cache_root())
         if font is None:
             return None
         cover = await asyncio.to_thread(card.fetch_cover, result, files)
@@ -833,19 +825,10 @@ async def _auto_rule(event: MessageEvent) -> bool:
     Returns:
         需要自动解析时返回 True。
     """
-    cfg = plugin_config
-    if not cfg.parsehub_auto:
-        return False
-    if isinstance(event, PrivateMessageEvent) and not cfg.parsehub_auto_private:
-        return False
-    if (
-        isinstance(event, GroupMessageEvent)
-        and cfg.parsehub_groups
-        and event.group_id not in cfg.parsehub_groups
-    ):
+    if not plugin_config.parsehub_auto:
         return False
     if not SWITCHES.is_on(_session_key(event)):
-        return False  # 这个会话被关掉了
+        return False  # 这个会话被关掉了（私聊默认就是关的，要超管「解析开」）
 
     text = event.get_plaintext()
     if text.lstrip().startswith(_COMMAND_PREFIXES):
@@ -975,8 +958,7 @@ async def _handle_auto(bot: Bot, event: MessageEvent) -> None:
     """
     urls = core.extract_urls(event.get_plaintext())
     for url in urls[:_MAX_LINKS_PER_MESSAGE]:
-        window = max(0, plugin_config.parsehub_dedupe_seconds)
-        if DEDUPE.should_skip(url, window):
+        if DEDUPE.should_skip(url, _DEDUPE_SECONDS):
             continue
         await handle_link(bot, event, url)
 

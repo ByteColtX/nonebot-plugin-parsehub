@@ -83,8 +83,12 @@ async def test_auto_matcher_ignores_plain_message(
 
 @pytest.mark.asyncio
 async def test_command_matcher_in_private(app: App, plugin, core, monkeypatch):
+    """私聊默认关，超管「解析开」之后手动解析才可用。"""
     _patch_parsehub(core, monkeypatch, result=FakeParseResult())
-    event = make_private_event("解析 https://b23.tv/abcd", message_id=3)
+    plugin.SWITCHES.set(plugin.switches.private_key(20001), True)
+    event = make_private_event(
+        "解析 https://b23.tv/abcd", user_id=20001, message_id=3
+    )
 
     async with app.test_matcher(plugin.parse_cmd) as ctx:
         bot = ctx.create_bot(

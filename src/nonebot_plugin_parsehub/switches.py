@@ -12,9 +12,10 @@
 用法::
 
     store = SwitchStore(Path("sessions.json"))
-    store.is_on(group_key(941285969))   # True（默认）
+    store.is_on(group_key(941285969))   # True（群默认开）
+    store.is_on(private_key(20000))     # False（私聊默认关）
     store.set(group_key(941285969), False)
-    store.toggle(private_key(20000))
+    store.set(private_key(20000), True)  # 超管给某个私聊单独打开
 """
 
 from __future__ import annotations
@@ -22,12 +23,25 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 logger = logging.getLogger("nonebot_plugin_parsehub.switches")
 
-# 没有记录时的默认值：允许解析（保持和加这个功能之前一样的行为）。
-DEFAULT_ON = True
+
+def default_on(key: str) -> bool:
+    """没有记录时的默认值：群默认开，私聊默认关。
+
+    私聊默认关，是因为私聊里没有「群管理」可以兜底——任何好友都能让机器人干活；
+    需要的话超管用 ``解析开`` 给某个私聊单独打开。
+
+    Args:
+        key: :func:`group_key` / :func:`private_key` 生成的键。
+
+    Returns:
+        默认允许解析为 ``True``。
+    """
+    return not key.startswith("private:")
 
 
 def group_key(group_id: int) -> str:
@@ -59,15 +73,17 @@ class SwitchStore:
 
     Attributes:
         path: 状态文件位置。
-        default: 没有记录时的默认值。
+        default: 算默认值的函数，签名 ``(key) -> bool``。
     """
 
-    def __init__(self, path: Path, *, default: bool = DEFAULT_ON) -> None:
+    def __init__(
+        self, path: Path, *, default: Callable[[str], bool] = default_on
+    ) -> None:
         """读入已有状态。
 
         Args:
             path: 状态文件位置。
-            default: 没有记录时的默认值。
+            default: 算默认值的函数。
         """
         self.path = path
         self.default = default
@@ -115,7 +131,7 @@ class SwitchStore:
         Returns:
             允许为 ``True``。
         """
-        return self._state.get(key, self.default)
+        return self._state.get(key, self.default(key))
 
     def set(self, key: str, on: bool) -> bool:
         """设置开关并落盘。
@@ -127,7 +143,7 @@ class SwitchStore:
         Returns:
             设置之后的值。
         """
-        if on == self.default:
+        if on == self.default(key):
             self._state.pop(key, None)  # 和默认值一样就不留记录
         else:
             self._state[key] = on

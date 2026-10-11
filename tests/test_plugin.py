@@ -172,13 +172,12 @@ def test_config_accepts_env_style_values():
     from nonebot_plugin_parsehub.config import Config
 
     cfg = Config(
-        parsehub_groups=[941285969],  # .env 写 [941285969]
-        parsehub_video_send="video",
         parsehub_max_mb=100,  # .env 里的数字是 int
         parsehub_auto=True,
+        parsehub_proxy_platforms=["twitter", "youtube"],  # .env 写 JSON 列表
     )
-    assert cfg.parsehub_groups == [941285969]
     assert cfg.parsehub_max_mb == 100
+    assert cfg.parsehub_proxy_platforms == ["twitter", "youtube"]
     assert Config(parsehub_max_mb="100").parsehub_max_mb == 100  # 字符串也接住
 
 
@@ -219,8 +218,9 @@ async def test_auto_rule_ignores_command(plugin):
 
 
 @pytest.mark.asyncio
-async def test_auto_rule_respects_group_filter(plugin, monkeypatch):
-    monkeypatch.setattr(plugin.plugin_config, "parsehub_groups", [999])
+async def test_auto_rule_respects_session_switch(plugin):
+    """群白名单已改成按会话的开关：关掉的群不解析，别的群不受影响。"""
+    plugin.SWITCHES.set(plugin.switches.group_key(123456), False)
     assert (
         await plugin._auto_rule(
             make_group_event("https://b23.tv/abcd", group_id=123456)
@@ -570,49 +570,6 @@ async def test_handle_link_video_failure_does_not_fallback(
         kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
     ]
     assert plugin.REACT_FAIL in emojis, emojis  # 失败要回应失败表情
-
-
-@pytest.mark.asyncio
-async def test_handle_link_video_mode_file(
-    plugin, monkeypatch, tmp_media, core
-):
-    video = tmp_media / "v.mp4"
-    video.write_bytes(b"x" * 2048)
-
-    async def fake_parse(url, proxy="", cookie=""):
-        return FakeParseResult(
-            media=FakeMediaRef("https://cdn.example.com/v.mp4")
-        )
-
-    async def fake_download(url, path, proxy="", cookie=""):
-        return FakeDownloadResult([video])
-
-    monkeypatch.setattr(
-        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
-    )
-    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
-    monkeypatch.setattr(core.CLIENT, "download", fake_download)
-    monkeypatch.setattr(
-        core,
-        "probe_size",
-        lambda url, timeout=15, proxy="": asyncio.sleep(0, result=2048),
-    )
-    monkeypatch.setattr(plugin.plugin_config, "parsehub_video_send", "file")
-
-    bot = FakeBot()
-    await plugin.handle_link(
-        bot, make_group_event("https://b23.tv/abcd"), "https://b23.tv/abcd"
-    )
-
-    apis = [api for api, _ in bot.calls]
-    assert "upload_group_file" in apis, apis
-    emojis = [
-        kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
-    ]
-    assert plugin.REACT_OK in emojis, emojis  # 成功要回应成功表情
-    upload = dict(bot.calls)["upload_group_file"]
-    assert upload["group_id"] == 123456
-    assert upload["file"].startswith("http://127.0.0.1:18899/")
 
 
 @pytest.mark.asyncio

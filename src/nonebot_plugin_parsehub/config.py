@@ -33,21 +33,16 @@ class Config(BaseModel):
     """ParseHub 链接解析插件配置。
 
     Attributes:
-        parsehub_auto: 群里出现受支持的链接时是否自动解析。
-        parsehub_groups: 自动解析生效的群号，留空表示所有群。
-        parsehub_auto_private: 私聊是否也自动解析。
-        parsehub_dedupe_seconds: 同一链接的去重窗口（秒）。
+        parsehub_auto: 群里出现受支持的链接时是否自动解析。具体到某个会话
+            （群 / 私聊）的开与关用命令 ``解析开关`` 控制，不在这里配。
         parsehub_concurrency: 同时处理的任务数上限。
         parsehub_proxy: 解析 / 下载代理地址，留空表示直连。
         parsehub_proxy_platforms: 只对这些平台走代理，留空表示所有平台都走。
         parsehub_cookie: 兜底 cookie，优先使用 ParseHub 自己的 cookies.toml。
         parsehub_timeout: 解析加下载的总超时（秒）。
         parsehub_max_mb: 单个媒体文件体积上限（MB），超过则跳过。
-        parsehub_video_send: 视频发送方式，``video`` 用视频消息段，``file``
-            上传群文件。
         parsehub_card: 是否把解析结果画成卡片图发送（失败自动退回文字）。
         parsehub_card_font: 中文字体文件路径，留空则自动找系统字体或下载。
-        parsehub_card_font_url: 字体下载地址，留空则用内置的几个镜像。
         parsehub_send_text: 是否发送标题与正文文字。
         parsehub_max_chars: 正文最多发送的字符数。
         parsehub_forward_timeout: 合并转发等待协议端的秒数。协议端要把节点里的
@@ -62,9 +57,6 @@ class Config(BaseModel):
 
     # ---- 触发 ----
     parsehub_auto: bool = True
-    parsehub_groups: list[int] = Field(default_factory=list)
-    parsehub_auto_private: bool = False
-    parsehub_dedupe_seconds: int = 120
     parsehub_concurrency: int = 2
 
     # ---- 解析 / 下载 ----
@@ -77,10 +69,8 @@ class Config(BaseModel):
     parsehub_max_mb: int = 100
 
     # ---- 发送 ----
-    parsehub_video_send: str = "video"
     parsehub_card: bool = True
     parsehub_card_font: str = ""
-    parsehub_card_font_url: str = ""
     parsehub_send_text: bool = True
     parsehub_max_chars: int = 300
     parsehub_forward_timeout: int = 60
@@ -88,7 +78,7 @@ class Config(BaseModel):
 
     # ---- 媒体中转服务 ----
     parsehub_files_host: str = ""
-    parsehub_files_port: int = 8899
+    parsehub_files_port: int = 21473
     parsehub_keep_minutes: int = 30
 
 
