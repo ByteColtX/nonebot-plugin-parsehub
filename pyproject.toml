@@ -20,6 +20,7 @@ dependencies = [
   "nonebot-plugin-localstore>=0.7.4,<1.0.0",
   "nonebot2>=2.5.0,<3.0.0",
   "parsehub>=2.3.3,<3.0.0",
+  "pillow>=12.1.0,<13.0.0",
   "pydantic>=2.0.0,<3.0.0",
 ]
 

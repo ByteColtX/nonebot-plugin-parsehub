@@ -12,9 +12,9 @@
 用法::
 
     store = SwitchStore(Path("sessions.json"))
-    store.is_on(group_key(941285969))   # True（默认开）
+    store.is_on(group_key(123456789))   # True（默认开）
     store.is_on(private_key(20000))     # True（私聊也默认开）
-    store.set(group_key(941285969), False)   # 关掉这个群
+    store.set(group_key(123456789), False)   # 关掉这个群
     store.set(private_key(20000), False)     # 关掉这个私聊
 """
 
@@ -39,7 +39,7 @@ def group_key(group_id: int) -> str:
         group_id: 群号。
 
     Returns:
-        形如 ``group:941285969`` 的键。
+        形如 ``group:123456789`` 的键。
     """
     return f"group:{group_id}"
 

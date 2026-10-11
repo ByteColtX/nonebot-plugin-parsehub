@@ -11,7 +11,7 @@ from pathlib import Path
 def test_default_on_for_group_and_private(tmp_path: Path, switches) -> None:
     """群和私聊都默认允许解析。"""
     store = switches.SwitchStore(tmp_path / "sessions.json")
-    assert store.is_on(switches.group_key(941285969)) is True
+    assert store.is_on(switches.group_key(123456789)) is True
     assert store.is_on(switches.private_key(20000)) is True
     assert store.off_keys() == []
 
