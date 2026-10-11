@@ -75,6 +75,8 @@ class Config(BaseModel):
     parsehub_max_mb: int = 100
     # 视频时长上限（秒）：超过就只发封面 + 一句提示，不下载。0 = 不限。
     parsehub_max_seconds: int = 300
+    # 平台白名单：只解析这些平台，留空 = 全部。可写平台 id 或中文名。
+    parsehub_platforms: list[str] = Field(default_factory=list)
 
     # ---- 发送 ----
     parsehub_cache_hours: int = 24

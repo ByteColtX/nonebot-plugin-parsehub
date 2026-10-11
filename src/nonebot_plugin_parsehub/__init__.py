@@ -220,6 +220,18 @@ _WATCH_NAMES: dict[str, str] = {
     "wechat": "微信",
 }
 
+# 平台白名单里允许写这些别名（parsehub 的 id 是 xhs / weixin / x，容易写错）。
+_PLATFORM_ALIASES: dict[str, str] = {
+    "xiaohongshu": "xhs",
+    "red": "xhs",
+    "小红书": "xhs",
+    "wechat": "weixin",
+    "twitter": "x",
+    "哔哩哔哩": "bilibili",
+    "b站": "bilibili",
+    "抖音": "douyin",
+}
+
 
 @dataclass
 class _RelayEndpoint:
@@ -629,6 +641,15 @@ async def _parse_and_send(
             return
         DEDUPE.mark(session, pre_key)
 
+    # 平台白名单（PARSEHUB_PLATFORMS）：留空 = 全部平台。必须挡在缓存前面，
+    # 否则白名单之外的平台还能靠缓存把旧作品发出来。
+    platform = await core.CLIENT.platform_id(url) or ""
+    if platform and not _platform_allowed(platform, cfg):
+        logger.info(f"[parsehub] {platform} 不在解析白名单里，跳过")
+        if manual:
+            await _send(bot, event, Message(_platform_off_message(platform)))
+        return
+
     # 本地已经有这个作品的媒体就直接发，省掉解析、下载和画卡。
     # 例外：缓存里记着这个作品超过时长上限（可能是加限制之前存进去的），那就
     # 照常走解析，让后面的时长判断去发封面 + 提示，别从缓存里把长片发出去。
@@ -643,7 +664,6 @@ async def _parse_and_send(
             await _send(bot, event, Message("这个链接 ParseHub 不支持。"))
         return
 
-    platform = await core.CLIENT.platform_id(url) or ""
     proxy = core.proxy_for(platform)
     cookie = core.platform_cookie(platform, cfg.parsehub_cookie)
     logger.debug(f"[parsehub] {platform} 代理={proxy or '直连'}")
@@ -787,6 +807,61 @@ def _cached_over_limit(entry: Path, cfg: Config) -> bool:
     if not limit:
         return False
     return mediacache.MediaCache.entry_seconds(entry) > limit
+
+
+def _normalise_platform(name: str) -> str:
+    """把白名单里写的平台名归一成 parsehub 的平台 id。
+
+    先查手写别名表（小红书 → xhs 这种），再查展示名唯一匹配的平台。
+
+    Args:
+        name: 白名单里写的一项，如 ``小红书`` / ``xhs`` / ``bilibili``。
+
+    Returns:
+        归一后的平台 id。
+    """
+    key = name.strip().lower()
+    if key in _PLATFORM_ALIASES:
+        return _PLATFORM_ALIASES[key]
+    if key in card.PLATFORMS:
+        return key
+    matches = {
+        platform_id
+        for platform_id, (display, _, _) in card.PLATFORMS.items()
+        if display.lower() == key
+    }
+    return matches.pop() if len(matches) == 1 else key
+
+
+def _platform_allowed(platform: str, cfg: Config) -> bool:
+    """该平台是否在解析白名单里。
+
+    Args:
+        platform: parsehub 的平台 id。
+        cfg: 当前插件配置。
+
+    Returns:
+        白名单为空（不限）或平台命中时返回 True。
+    """
+    allowed = {
+        _normalise_platform(item) for item in cfg.parsehub_platforms if item
+    }
+    if not allowed:
+        return True
+    return platform.lower() in allowed
+
+
+def _platform_off_message(platform: str) -> str:
+    """平台不在白名单里时给命令触发者的提示。
+
+    Args:
+        platform: parsehub 的平台 id。
+
+    Returns:
+        一句提示文案。
+    """
+    name = card.PLATFORMS.get(platform, (platform or "这个平台",))[0]
+    return f"{name} 暂时没开解析。"
 
 
 def _watch_name(result: object, display_name: str) -> str:

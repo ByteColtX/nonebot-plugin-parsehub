@@ -135,6 +135,7 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 | `PARSEHUB_AUTO` | 否 | `true` | 群里出现链接时自动解析（总开关） |
 | `PARSEHUB_MAX_MB` | 否 | `100` | 单个媒体文件体积上限（MB），超过直接跳过；`0` = 不限 |
 | `PARSEHUB_MAX_SECONDS` | 否 | `300` | 视频时长上限（秒），超过只发封面 + 一句提示、不下载；`0` = 不限 |
+| `PARSEHUB_PLATFORMS` | 否 | 无 | 平台白名单：只解析这些平台，留空 = 全部。可写平台 id（`xhs`）或中文名（`小红书`） |
 | `PARSEHUB_DEDUPE_SECONDS` | 否 | `120` | 同一会话内同一链接的去重窗口（秒），`0` = 不去重 |
 | `PARSEHUB_CONCURRENCY` | 否 | `2` | 同时处理的任务数 |
 | `PARSEHUB_PROXY` | 否 | 无 | 解析 / 下载代理，如 `http://127.0.0.1:7890` |
