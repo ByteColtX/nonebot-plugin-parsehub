@@ -36,6 +36,10 @@ CACHE_DIR_NAME = "media"
 CARD_NAME = "card.jpg"
 CAPTION_NAME = "caption.txt"
 
+# 记下这个条目对应哪些作品 key（命中时要把它们一起记进去重，否则同一个作品
+# 换个写法再发会被当成新作品）。
+KEYS_NAME = "keys.txt"
+
 # 媒体文件放在条目目录的这个子目录里，避免和卡片图混在一起。
 FILES_DIR_NAME = "files"
 
@@ -158,6 +162,45 @@ class MediaCache:
         return card if card.is_file() else None
 
     @staticmethod
+    def entry_keys(entry: Path) -> list[str]:
+        """条目对应的所有作品 key。
+
+        Args:
+            entry: 条目目录。
+
+        Returns:
+            作品 key 列表；没记录过时为空列表。
+        """
+        keys = entry / KEYS_NAME
+        if not keys.is_file():
+            return []
+        try:
+            return [
+                line.strip()
+                for line in keys.read_text("utf-8").splitlines()
+                if line.strip()
+            ]
+        except OSError:
+            return []
+
+    @staticmethod
+    def remember_key(entry: Path, key: str) -> None:
+        """把 key 补记到条目里（老条目没有 keys.txt，命中时顺手补上）。
+
+        Args:
+            entry: 条目目录。
+            key: 作品 key。
+        """
+        keys = MediaCache.entry_keys(entry)
+        if key in keys:
+            return
+        keys.append(key)
+        try:
+            (entry / KEYS_NAME).write_text("\n".join(keys), "utf-8")
+        except OSError as exc:
+            logger.warning(f"[parsehub] 缓存 key 补记失败: {exc}")
+
+    @staticmethod
     def caption_path(entry: Path) -> Path | None:
         """条目里的文字。
 
@@ -228,6 +271,10 @@ class MediaCache:
                 (primary / CAPTION_NAME).write_text(caption, "utf-8")
             except OSError as exc:
                 logger.warning(f"[parsehub] 缓存文字失败: {exc}")
+        try:
+            (primary / KEYS_NAME).write_text("\n".join(keys), "utf-8")
+        except OSError as exc:
+            logger.warning(f"[parsehub] 缓存 key 记录失败: {exc}")
 
         os.utime(primary, None)
         for key in keys[1:]:

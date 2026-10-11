@@ -128,7 +128,16 @@ def test_alias_key_points_to_same_files(tmp_path: Path, mediacache) -> None:
     assert mediacache.MediaCache.media_files(alias)[0].resolve() == (
         mediacache.MediaCache.media_files(primary)[0].resolve()
     )
-    assert cache.total_bytes() == 2048, "别名不该被重复计算"
+    # 别名不该被重复计算：总量就是主条目那份
+    only_primary = sum(
+        item.stat().st_size for item in primary.rglob("*") if item.is_file()
+    )
+    assert cache.total_bytes() == only_primary
+    # 条目要记下自己对应哪些 key，命中时好把它们一起记进去重
+    assert sorted(mediacache.MediaCache.entry_keys(primary)) == [
+        "b23.tv_3xdwepo",
+        "bilibili:bv1",
+    ]
 
 
 def test_broken_alias_is_cleaned(tmp_path: Path, mediacache) -> None:

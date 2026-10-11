@@ -290,30 +290,57 @@ class DedupeCache:
         """初始化空缓存。"""
         self._seen: dict[tuple[str, str], float] = {}
 
-    def should_skip(self, session: str, url: str, window: int) -> bool:
-        """判断这个会话里该链接是否在去重窗口内出现过。
-
-        无论是否跳过，都会刷新时间戳并顺手清理过期记录。
+    def seen(self, session: str, key: str, window: int) -> bool:
+        """这个会话里该 key 是否还在窗口内（只看不记）。
 
         Args:
             session: 会话标识（群 / 私聊）。
-            url: 待检查的链接。
+            key: 作品 key。
+            window: 去重窗口（秒），小于等于 0 表示不去重。
+
+        Returns:
+            窗口内出现过返回 True。
+        """
+        if window <= 0:
+            return False
+        self._prune(window)
+        last_seen = self._seen.get((session, key))
+        return last_seen is not None and time.time() - last_seen < window
+
+    def mark(self, session: str, key: str) -> None:
+        """记下这个会话里该 key 刚被处理过。
+
+        Args:
+            session: 会话标识（群 / 私聊）。
+            key: 作品 key。
+        """
+        self._seen[(session, key)] = time.time()
+
+    def should_skip(self, session: str, key: str, window: int) -> bool:
+        """查一下并顺手记上（「处理过了」的语义）。
+
+        Args:
+            session: 会话标识（群 / 私聊）。
+            key: 作品 key。
             window: 去重窗口（秒），小于等于 0 表示不去重。
 
         Returns:
             窗口内重复出现返回 True。
         """
+        repeated = self.seen(session, key, window)
+        self.mark(session, key)
+        return repeated
+
+    def _prune(self, window: int) -> None:
+        """清掉窗口外的旧记录。
+
+        Args:
+            window: 去重窗口（秒）。
+        """
         now = time.time()
         for key, timestamp in list(self._seen.items()):
             if now - timestamp > window:
                 self._seen.pop(key, None)
-
-        key = (session, url)
-        last_seen = self._seen.get(key)
-        self._seen[key] = now
-        if window <= 0 or last_seen is None:
-            return False
-        return now - last_seen < window
 
 
 class ParseHubClient:

@@ -498,10 +498,10 @@ def _patch_cached_parsehub(core, monkeypatch, tmp_media, calls, raw_url):
 
 
 @pytest.mark.asyncio
-async def test_second_post_served_from_cache(
+async def test_cache_hit_still_respects_dedupe(
     plugin, monkeypatch, tmp_media, core
 ):
-    """同一条链接第二次出现：直接发本地缓存，不解析也不下载。"""
+    """命中缓存也要遵守去重：同一个群不能靠缓存把同一个作品反复发。"""
     calls = {"parse": 0, "download": 0}
     _patch_cached_parsehub(
         core,
@@ -517,13 +517,44 @@ async def test_second_post_served_from_cache(
     assert calls == {"parse": 1, "download": 1}
     assert [api for api, _ in first.calls].count("send_msg") > 0
 
+    # 同一个群再来一次：去重拦住，什么都不发（以前会被缓存重新发一遍）
     second = FakeBot()
     await plugin.handle_link(second, make_group_event(url), url)
+    assert calls == {"parse": 1, "download": 1}
+    assert [api for api, _ in second.calls].count("send_msg") == 0
+
+    # 换个群：命中缓存直接发，不解析也不下载
+    third = FakeBot()
+    await plugin.handle_link(third, make_group_event(url, group_id=654321), url)
+    assert calls == {"parse": 1, "download": 1}, "缓存命中不该再解析 / 下载"
+    assert [api for api, _ in third.calls].count("send_msg") > 0
+
+
+@pytest.mark.asyncio
+async def test_same_work_other_url_form_in_same_session_is_silent(
+    plugin, monkeypatch, tmp_media, core
+):
+    """用户复现过的那对链接：先短链、再完整链，同一个群只发一次。"""
+    calls = {"parse": 0, "download": 0}
+    _patch_cached_parsehub(
+        core,
+        monkeypatch,
+        tmp_media,
+        calls,
+        "https://www.douyin.com/video/7694556586975504313",
+    )
+    short = "https://v.douyin.com/mSJ4_DyZ4go/"
+    full = "https://www.iesdouyin.com/share/video/7694556586975504313/"
+
+    first = FakeBot()
+    await plugin.handle_link(first, make_group_event(short), short)
+    assert [api for api, _ in first.calls].count("send_msg") > 0
+
+    second = FakeBot()
+    await plugin.handle_link(second, make_group_event(full), full)
     assert calls == {"parse": 1, "download": 1}, "第二次不该再解析 / 下载"
-    sent = [kw["message"] for api, kw in second.calls if api == "send_msg"]
-    assert sent, "命中缓存也要把内容发出去"
-    assert any(
-        "pic.jpg" in seg.data.get("file", "") for msg in sent for seg in msg
+    assert [api for api, _ in second.calls].count("send_msg") == 0, (
+        "同一个作品换个写法再发，同群应该静默"
     )
 
 

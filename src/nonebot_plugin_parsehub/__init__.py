@@ -548,10 +548,22 @@ async def _parse_and_send(
         manual: 是否为命令触发。
         cfg: 当前插件配置。
     """
-    # 本地已经有这个作品的媒体就直接发，省掉解析、下载和画卡。
+    session = _session_key(event)
+    window = max(0, cfg.parsehub_dedupe_seconds)
     pre_key = core.content_key(url)
+
+    # 去重是「这个会话里刚发过就别再刷」的规则，必须挡在缓存前面：
+    # 否则命中缓存会把同一个作品一次次重新发出去。
+    if not manual:
+        if DEDUPE.seen(session, pre_key, window):
+            logger.info(f"[parsehub] {pre_key} 在本会话刚发过，跳过")
+            return
+        DEDUPE.mark(session, pre_key)
+
+    # 本地已经有这个作品的媒体就直接发，省掉解析、下载和画卡。
     cached = MEDIA_CACHE.get(pre_key)
     if cached is not None:
+        _mark_cached_keys(session, cached, pre_key)
         await _send_cached(bot, event, cached, cfg)
         return
 
@@ -596,15 +608,18 @@ async def _parse_and_send(
     # 写法（b23.tv/xxx 与 bilibili.com/video/BVxxx）在同一个会话里也只发一次。
     # 手动「解析」是明确要求，不做这层拦截。
     post_key = core.content_key(getattr(result, "raw_url", "") or url)
-    if not manual:
-        window = max(0, cfg.parsehub_dedupe_seconds)
-        if DEDUPE.should_skip(_session_key(event), post_key, window):
+    # 完整链的 pre_key 就等于 post_key，再查一次会把上面自己记的那条当成重复，
+    # 所以只有两者不同（短链展开后变了）才需要再查。
+    if not manual and post_key != pre_key:
+        if DEDUPE.seen(session, post_key, window):
             logger.info(f"[parsehub] {post_key} 在本会话刚发过，跳过发送")
             return
+        DEDUPE.mark(session, post_key)
 
     # 短链没命中缓存（缓存里记的是展开后的 key），解析完再查一次：命中就省掉下载
     cached = MEDIA_CACHE.get(post_key)
     if cached is not None:
+        _mark_cached_keys(session, cached, post_key)
         await _send_cached(bot, event, cached, cfg)
         return
 
@@ -877,6 +892,21 @@ async def _send_cached(
     return True
 
 
+def _mark_cached_keys(session: str, entry: Path, key: str) -> None:
+    """命中缓存时，把这个条目的所有作品 key 都记进本会话的去重表。
+
+    否则「短链命中缓存」只会记下短链那份 key，同一个作品换成完整链再发就漏网了。
+
+    Args:
+        session: 会话标识（群 / 私聊）。
+        entry: 缓存条目目录。
+        key: 这次是用哪个 key 命中的（顺手补记进条目）。
+    """
+    mediacache.MediaCache.remember_key(entry, key)
+    for item in mediacache.MediaCache.entry_keys(entry):
+        DEDUPE.mark(session, item)
+
+
 def _session_key(event: MessageEvent) -> str:
     """取这条消息所属的会话键。
 
@@ -1086,7 +1116,9 @@ async def _handle_auto(bot: Bot, event: MessageEvent) -> None:
     session = _session_key(event)
     window = max(0, plugin_config.parsehub_dedupe_seconds)
     for url in urls[:_MAX_LINKS_PER_MESSAGE]:
-        if DEDUPE.should_skip(session, core.content_key(url), window):
+        # 只看不记：记录由 _parse_and_send 负责；这里先静默跳过，免得白发一个
+        # 「收到」表情
+        if DEDUPE.seen(session, core.content_key(url), window):
             continue
         await handle_link(bot, event, url)
 
