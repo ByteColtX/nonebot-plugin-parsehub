@@ -197,3 +197,51 @@ def test_ensure_font_prefers_local_file(tmp_path: Path, card) -> None:
     card._font_file.cache_clear()  # noqa: SLF001
     assert card.ensure_font(tmp_path) == local
     card.set_font(FONT)
+
+
+def _stripe_mark(colors: list[tuple[int, int, int]]) -> Image.Image:
+    """造一张 logo：按给定颜色竖向等分成几条，全部不透明。"""
+    width = 24 * len(colors)
+    image = Image.new("RGBA", (width, 24), (0, 0, 0, 0))
+    for index, color in enumerate(colors):
+        for y in range(24):
+            for x in range(index * 24, (index + 1) * 24):
+                image.putpixel((x, y), (*color, 255))
+    return image
+
+
+def test_is_dark_whitens_greyscale_marks(card) -> None:
+    """纯黑白的标在深色封面上会消失，必须转白。"""
+    assert card._is_dark(_stripe_mark([(0, 0, 0)])) is True
+    assert card._is_dark(_stripe_mark([(10, 10, 10), (120, 120, 120)])) is True
+
+
+def test_is_dark_keeps_brand_coloured_marks(card) -> None:
+    """带品牌色的标（抖音的黑 + 青 + 红）转白会把颜色抹掉，保留原色。"""
+    douyin = [(0, 0, 0), (38, 244, 238), (251, 44, 83)]
+    assert card._is_dark(_stripe_mark(douyin)) is False
+
+
+def test_is_dark_keeps_bright_marks(card) -> None:
+    """本来就不暗的标（B 站粉）不用转白。"""
+    assert card._is_dark(_stripe_mark([(251, 114, 153)])) is False
+
+
+def test_logo_sits_on_kicker_row(tmp_path: Path, card) -> None:
+    """平台图标落在「平台名」那一行：左边缘贴 INSET，位置在卡片下方。"""
+    out = tmp_path / "card.jpg"
+    assert card.render(FakeResult(), _cover_bytes(), out) is True
+    image = Image.open(out).convert("RGB")
+    pink = [
+        (x, y)
+        for y in range(image.height)
+        for x in range(image.width)
+        if abs(image.getpixel((x, y))[0] - 251) < 24
+        and abs(image.getpixel((x, y))[1] - 114) < 24
+        and abs(image.getpixel((x, y))[2] - 153) < 24
+    ]
+    assert pink, "卡片上没找到品牌粉的图标"
+    xs = [x for x, _ in pink]
+    ys = [y for _, y in pink]
+    assert min(xs) == pytest.approx(card.INSET, abs=8), min(xs)
+    assert (min(ys) + max(ys)) / 2 > image.height * 0.6

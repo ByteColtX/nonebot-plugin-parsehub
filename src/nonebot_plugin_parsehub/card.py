@@ -581,23 +581,31 @@ def _logo(slug: str, height: int) -> Any:  # noqa: ANN401 - PIL Image
 
 
 def _is_dark(logo: Any) -> bool:  # noqa: ANN401 - PIL Image
-    """判断 logo 是否整体偏暗（暗底上要转成白色剪影）。
+    """判断 logo 是否要转成白色剪影。
+
+    只有「偏暗且基本没有颜色」的标才转白：X、Threads、Medium 这类纯黑标在深色
+    封面上会消失，必须转白；而抖音的青红、微博的红、YouTube 的红这些带品牌色的
+    标，转白会把品牌色抹掉，所以只要颜色够多就保留原色。
 
     Args:
         logo: logo 图像。
 
     Returns:
-        偏暗时为 ``True``。
+        需要转白时为 ``True``。
     """
     pixels = logo.load()
-    total = count = 0
+    total = count = colorful = 0
     for y in range(0, logo.height, max(1, logo.height // 24)):
         for x in range(0, logo.width, max(1, logo.width // 24)):
             red, green, blue, alpha = pixels[x, y]
             if alpha > 128:
                 total += 0.299 * red + 0.587 * green + 0.114 * blue
+                if max(red, green, blue) - min(red, green, blue) > 40:
+                    colorful += 1
                 count += 1
-    return count > 0 and total / count < 110
+    if count == 0:
+        return False
+    return total / count < 110 and colorful / count < 0.2
 
 
 def _white(logo: Any) -> Any:  # noqa: ANN401 - PIL Image
@@ -728,12 +736,26 @@ def render(
     canvas = pic.convert("RGBA")
     logo = _shadowed_logo(slug, LOGO_HEIGHT)
     pad = logo.width - _logo(slug, LOGO_HEIGHT).width
-    canvas.alpha_composite(logo, (36 - pad // 2, 36 - pad // 2))
+    mark_w = logo.width - pad
+    mark_h = logo.height - pad
+
+    y = card_h - INSET - len(title_lines) * 70 - 8 - 34
+    kicker_y = y - 44
+    # 图标与「平台名」那一行垂直居中，左边缘贴 INSET
+    canvas.alpha_composite(
+        logo,
+        (
+            INSET - pad // 2,
+            kicker_y + KICKER_SIZE // 2 - mark_h // 2 - pad // 2,
+        ),
+    )
 
     draw = ImageDraw.Draw(canvas)
-    y = card_h - INSET - len(title_lines) * 70 - 8 - 34
     draw.text(
-        (INSET, y - 44), name.upper(), font=kicker_font, fill=(226, 226, 232)
+        (INSET + mark_w + 18, kicker_y),
+        name.upper(),
+        font=kicker_font,
+        fill=(226, 226, 232),
     )
     for line in title_lines:
         draw.text((INSET, y), line, font=title_font, fill=(255, 255, 255))
