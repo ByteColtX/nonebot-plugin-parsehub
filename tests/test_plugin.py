@@ -248,11 +248,21 @@ async def test_auto_rule_off(plugin, monkeypatch):
 # 3. 去重
 # --------------------------------------------------------------------------- #
 def test_dedupe_window(plugin):
-    """同一链接在窗口内只处理一次，不同链接互不影响。"""
-    assert plugin.DEDUPE.should_skip("https://b23.tv/a", 60) is False
-    assert plugin.DEDUPE.should_skip("https://b23.tv/a", 60) is True
-    assert plugin.DEDUPE.should_skip("https://b23.tv/b", 60) is False
-    assert plugin.DEDUPE.should_skip("https://b23.tv/a", 0) is False
+    """同一会话内、窗口内只处理一次；不同链接互不影响。"""
+    url = "https://b23.tv/a"
+    assert plugin.DEDUPE.should_skip("group:1", url, 60) is False
+    assert plugin.DEDUPE.should_skip("group:1", url, 60) is True
+    assert plugin.DEDUPE.should_skip("group:1", "https://b23.tv/b", 60) is False
+    assert plugin.DEDUPE.should_skip("group:1", url, 0) is False  # 0 = 不去重
+
+
+def test_dedupe_is_per_session(plugin):
+    """跨会话不去重：同一个链接换个群 / 私聊照样解析。"""
+    url = "https://b23.tv/a"
+    assert plugin.DEDUPE.should_skip("group:1", url, 60) is False
+    assert plugin.DEDUPE.should_skip("group:1", url, 60) is True
+    assert plugin.DEDUPE.should_skip("group:2", url, 60) is False
+    assert plugin.DEDUPE.should_skip("private:20000", url, 60) is False
 
 
 # --------------------------------------------------------------------------- #

@@ -103,9 +103,6 @@ _MAX_LINKS_PER_MESSAGE = 3
 # 临时文件清扫间隔（秒）。
 _SWEEP_INTERVAL_SECONDS = 300
 
-# 同一链接的去重窗口（秒）：同一条消息里重复出现的链接只解析一次。
-_DEDUPE_SECONDS = 120
-
 # 命令触发时用来跳过自动解析的前缀。
 _COMMAND_PREFIXES = ("解析", "ph", "/解析", "/ph")
 
@@ -957,8 +954,10 @@ async def _handle_auto(bot: Bot, event: MessageEvent) -> None:
         event: 触发消息事件。
     """
     urls = core.extract_urls(event.get_plaintext())
+    session = _session_key(event)
+    window = max(0, plugin_config.parsehub_dedupe_seconds)
     for url in urls[:_MAX_LINKS_PER_MESSAGE]:
-        if DEDUPE.should_skip(url, _DEDUPE_SECONDS):
+        if DEDUPE.should_skip(session, url, window):
             continue
         await handle_link(bot, event, url)
 

@@ -8,11 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_default_group_on_private_off(tmp_path: Path, switches) -> None:
-    """群默认开；私聊默认关（私聊里没有群管理兜底）。"""
+def test_default_on_for_group_and_private(tmp_path: Path, switches) -> None:
+    """群和私聊都默认允许解析。"""
     store = switches.SwitchStore(tmp_path / "sessions.json")
     assert store.is_on(switches.group_key(941285969)) is True
-    assert store.is_on(switches.private_key(20000)) is False
+    assert store.is_on(switches.private_key(20000)) is True
     assert store.off_keys() == []
 
 
@@ -41,17 +41,17 @@ def test_set_back_to_default_removes_record(tmp_path: Path, switches) -> None:
     assert '"group:123"' not in path.read_text("utf-8")
 
 
-def test_private_enable_is_recorded(tmp_path: Path, switches) -> None:
-    """私聊默认关，所以「开」才是要记下来的那个方向。"""
+def test_private_disable_is_recorded(tmp_path: Path, switches) -> None:
+    """私聊也能单独关掉，关掉是相对默认值的变化所以要落盘。"""
     path = tmp_path / "sessions.json"
     store = switches.SwitchStore(path)
-    assert store.set(switches.private_key(20000), True) is True
-    assert store.is_on(switches.private_key(20000)) is True
-    assert '"private:20000": true' in path.read_text("utf-8")
+    assert store.set(switches.private_key(20000), False) is False
+    assert store.is_on(switches.private_key(20000)) is False
+    assert '"private:20000": false' in path.read_text("utf-8")
 
     again = switches.SwitchStore(path)
-    assert again.is_on(switches.private_key(20000)) is True
-    again.set(switches.private_key(20000), False)  # 关回去 = 默认值
+    assert again.is_on(switches.private_key(20000)) is False
+    again.set(switches.private_key(20000), True)  # 开回来 = 默认值
     assert '"private:20000"' not in path.read_text("utf-8")
 
 

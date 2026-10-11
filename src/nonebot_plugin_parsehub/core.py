@@ -227,24 +227,26 @@ async def probe_size(
 
 
 class DedupeCache:
-    """同一链接在时间窗口内只处理一次。
+    """同一链接在同一个会话里、时间窗口内只处理一次。
 
-    记录每个链接最近一次被处理的时间戳，避免群里同一张卡片被反复解析。
+    记录 ``(会话, 链接)`` 最近一次被处理的时间戳，避免同一个群里同一张卡片被反复
+    解析。**跨会话不去重**：同一个链接在 A 群发过，B 群再发照样解析。
 
     Attributes:
-        _seen: 链接到最近处理时间戳的映射。
+        _seen: ``(会话, 链接)`` 到最近处理时间戳的映射。
     """
 
     def __init__(self) -> None:
         """初始化空缓存。"""
-        self._seen: dict[str, float] = {}
+        self._seen: dict[tuple[str, str], float] = {}
 
-    def should_skip(self, url: str, window: int) -> bool:
-        """判断该链接是否在去重窗口内出现过。
+    def should_skip(self, session: str, url: str, window: int) -> bool:
+        """判断这个会话里该链接是否在去重窗口内出现过。
 
-        无论是否跳过，都会刷新该链接的时间戳并顺手清理过期记录。
+        无论是否跳过，都会刷新时间戳并顺手清理过期记录。
 
         Args:
+            session: 会话标识（群 / 私聊）。
             url: 待检查的链接。
             window: 去重窗口（秒），小于等于 0 表示不去重。
 
@@ -256,8 +258,9 @@ class DedupeCache:
             if now - timestamp > window:
                 self._seen.pop(key, None)
 
-        last_seen = self._seen.get(url)
-        self._seen[url] = now
+        key = (session, url)
+        last_seen = self._seen.get(key)
+        self._seen[key] = now
         if window <= 0 or last_seen is None:
             return False
         return now - last_seen < window

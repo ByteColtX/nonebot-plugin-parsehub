@@ -35,6 +35,8 @@ class Config(BaseModel):
     Attributes:
         parsehub_auto: 群里出现受支持的链接时是否自动解析。具体到某个会话
             （群 / 私聊）的开与关用命令 ``解析开关`` 控制，不在这里配。
+        parsehub_dedupe_seconds: 同一链接在**同一个会话**里的去重窗口（秒）。
+            跨会话不去重：同一个链接在别的群 / 私聊里照样解析。
         parsehub_concurrency: 同时处理的任务数上限。
         parsehub_proxy: 解析 / 下载代理地址，留空表示直连。
         parsehub_proxy_platforms: 只对这些平台走代理，留空表示所有平台都走。
@@ -57,6 +59,7 @@ class Config(BaseModel):
 
     # ---- 触发 ----
     parsehub_auto: bool = True
+    parsehub_dedupe_seconds: int = 120
     parsehub_concurrency: int = 2
 
     # ---- 解析 / 下载 ----
