@@ -549,15 +549,22 @@ async def _parse_and_send(
             )
             return
 
+    # 先出卡：thumb_url / 图片媒体通常够用，不必等下载。此时不发文字兜底，
+    # 免得下载抽帧那一步白做
+    card_sent = await _send_card_or_text(
+        bot, event, result, display_name, [], None, cfg, allow_text=False
+    )
+
     downloaded = await _download_task(bot, event, url, proxy, cookie, cfg)
     if downloaded is None:
         return
     task_dir, files = downloaded
 
-    # 卡片先发（信息卡），媒体随后
-    await _send_card_or_text(
-        bot, event, result, display_name, files, task_dir, cfg
-    )
+    # 上面没出成卡（封面得从视频里抽帧）就带上下载好的文件再试一次
+    if not card_sent:
+        await _send_card_or_text(
+            bot, event, result, display_name, files, task_dir, cfg
+        )
     if files:
         await _send_media_files(bot, event, files)
         logger.info(
@@ -694,7 +701,9 @@ async def _send_card_or_text(
     files: list[Path],
     task_dir: Path | None,
     cfg: Config,
-) -> None:
+    *,
+    allow_text: bool = True,
+) -> bool:
     """优先发卡片图，卡片不可用时退回文字。
 
     Args:
@@ -705,6 +714,11 @@ async def _send_card_or_text(
         files: 已下载的本地媒体。
         task_dir: 任务目录。
         cfg: 当前插件配置。
+        allow_text: 出不了卡时是否立刻退回文字。下载前那次调用要传 ``False``，
+            否则文字先发了，等下载完再抽帧出卡就成了重复消息。
+
+    Returns:
+        发出去了（卡片或文字）为 ``True``。
     """
     if cfg.parsehub_card:
         out_path = await _render_card(result, files, task_dir, cfg)
@@ -712,13 +726,15 @@ async def _send_card_or_text(
             url = server.RELAY.url_for(out_path, _ENDPOINT.host, _ENDPOINT.port)
             try:
                 await bot.send(event, MessageSegment.image(file=url))
-                return
+                return True
             except Exception as exc:  # noqa: BLE001 - 发图失败就退回文字
                 logger.warning(
                     f"[parsehub] 卡片发送失败: {type(exc).__name__}: {exc}"
                 )
-    if cfg.parsehub_send_text:
+    if allow_text and cfg.parsehub_send_text:
         await _send(bot, event, _build_caption(result, display_name, cfg))
+        return True
+    return False
 
 
 async def _auto_rule(event: MessageEvent) -> bool:

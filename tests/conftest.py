@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import nonebot
 import pytest
@@ -10,6 +11,9 @@ from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 from pytest_asyncio import is_async_test
 
 os.environ.setdefault("ENVIRONMENT", "test")
+
+# 子集字体：测试绝不联网去下 18MB 的完整字体
+TEST_FONT = Path(__file__).resolve().parent / "assets" / "test-font.ttf"
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -53,3 +57,14 @@ def server(plugin):
 def card(plugin):
     """插件的 card 子模块（必须在 nonebot 初始化之后才 import）。"""
     return plugin.card
+
+
+@pytest.fixture(autouse=True)
+def _offline_card(card, monkeypatch):
+    """卡片模块在测试里一律不联网。
+
+    字体换成仓库里的子集，封面一律当作取不到（否则会真去请求封面 CDN）。
+    需要真出卡的测试自己再 monkeypatch ``card.render`` / ``card.fetch_cover``。
+    """
+    card.set_font(TEST_FONT)
+    monkeypatch.setattr(card, "fetch_cover", lambda *a, **kw: None)

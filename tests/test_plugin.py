@@ -313,6 +313,51 @@ async def test_handle_link_sends_text_and_image(
 
 
 @pytest.mark.asyncio
+async def test_handle_link_sends_card_before_media(
+    plugin, monkeypatch, tmp_media, core, card
+):
+    """能出卡时：卡片先发、媒体随后，且不再补一条文字。"""
+    img = tmp_media / "pic.jpg"
+    img.write_bytes(b"x" * 1024)
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(
+            media=FakeMediaRef("https://cdn.example.com/pic.jpg", "jpg")
+        )
+
+    async def fake_download(url, path, proxy="", cookie=""):
+        return FakeDownloadResult([img])
+
+    def fake_render(result, cover, out):
+        out.write_bytes(b"jpeg")
+        return True
+
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+    monkeypatch.setattr(core.CLIENT, "download", fake_download)
+    monkeypatch.setattr(
+        core,
+        "probe_size",
+        lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
+    )
+    monkeypatch.setattr(card, "fetch_cover", lambda result, files: b"cover")
+    monkeypatch.setattr(card, "render", fake_render)
+
+    bot = FakeBot()
+    await plugin.handle_link(
+        bot, make_group_event("https://b23.tv/abcd"), "https://b23.tv/abcd"
+    )
+
+    sent = [kw["message"] for api, kw in bot.calls if api == "send_msg"]
+    assert len(sent) == 2, sent  # 卡片 + 媒体，没有第三条文字
+    assert "card.jpg" in sent[0][0].data["file"]
+    assert "pic.jpg" in sent[1][0].data["file"]
+    assert bot.sent_texts == ["", ""], "出了卡就不该再发文字"
+
+
+@pytest.mark.asyncio
 async def test_handle_link_live_photo_sends_image_and_video(
     plugin, monkeypatch, tmp_media, core
 ):
