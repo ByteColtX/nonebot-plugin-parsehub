@@ -191,11 +191,12 @@ class MediaRelay:
         relative = path.resolve().relative_to(self.root.resolve())
         return f"http://{host}:{port}/{relative.as_posix()}"
 
-    def cleanup(self, keep_seconds: int) -> int:
+    def cleanup(self, keep_seconds: int, skip: set[str] | None = None) -> int:
         """删除过期的任务目录。
 
         Args:
             keep_seconds: 保留时长（秒），早于该时长的目录会被删除。
+            skip: 不参与清扫的子目录名（比如媒体缓存目录）。
 
         Returns:
             删除的目录数量。
@@ -203,9 +204,12 @@ class MediaRelay:
         if not self.root.exists():
             return 0
 
+        skip = skip or set()
         now = time.time()
         removed = 0
         for child in self.root.iterdir():
+            if child.name in skip:
+                continue
             try:
                 expired = (
                     child.is_dir()

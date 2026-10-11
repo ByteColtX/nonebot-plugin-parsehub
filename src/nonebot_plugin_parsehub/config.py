@@ -43,6 +43,9 @@ class Config(BaseModel):
         parsehub_cookie: 兜底 cookie，优先使用 ParseHub 自己的 cookies.toml。
         parsehub_timeout: 解析加下载的总超时（秒）。
         parsehub_max_mb: 单个媒体文件体积上限（MB），超过则跳过。
+        parsehub_cache_hours: 媒体缓存保留小时数。命中缓存就直接发本地那份，
+            不再解析、下载、画卡；0 表示关闭缓存。
+        parsehub_cache_max_mb: 媒体缓存总容量上限（MB），超了按最久没用过的删。
         parsehub_card: 是否把解析结果画成卡片图发送（失败自动退回文字）。
         parsehub_card_font: 中文字体文件路径，留空则自动找系统字体或下载。
         parsehub_send_text: 是否发送标题与正文文字。
@@ -72,6 +75,8 @@ class Config(BaseModel):
     parsehub_max_mb: int = 100
 
     # ---- 发送 ----
+    parsehub_cache_hours: int = 24
+    parsehub_cache_max_mb: int = 1024
     parsehub_card: bool = True
     parsehub_card_font: str = ""
     parsehub_send_text: bool = True

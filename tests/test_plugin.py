@@ -431,6 +431,15 @@ async def test_same_video_other_url_form_is_skipped(
         lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
     )
 
+    # 这个用例只测去重，关掉媒体缓存免得缓存先命中
+    monkeypatch.setattr(
+        plugin,
+        "MEDIA_CACHE",
+        plugin.mediacache.MediaCache(
+            tmp_media / "nocache", ttl_seconds=0, max_bytes=0
+        ),
+    )
+
     short = "https://b23.tv/3XdwepO"
     full = "https://www.bilibili.com/video/BV1yupv6YEuE"
 
@@ -457,6 +466,121 @@ async def test_same_video_other_url_form_is_skipped(
     assert [api for api, _ in third.calls].count("send_msg") > 0, (
         "换个会话就该照常解析"
     )
+
+
+def _patch_cached_parsehub(core, monkeypatch, tmp_media, calls, raw_url):
+    """把解析 / 下载换成计数用的假实现。"""
+    img = tmp_media / "pic.jpg"
+    img.write_bytes(b"x" * 1024)
+
+    async def fake_parse(url, proxy="", cookie=""):
+        calls["parse"] += 1
+        return FakeParseResult(
+            media=FakeMediaRef("https://cdn.example.com/pic.jpg", "jpg"),
+            raw_url=raw_url,
+        )
+
+    async def fake_download(url, path, proxy="", cookie=""):
+        calls["download"] += 1
+        return FakeDownloadResult([img])
+
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+    monkeypatch.setattr(core.CLIENT, "download", fake_download)
+    monkeypatch.setattr(
+        core,
+        "probe_size",
+        lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
+    )
+    return img
+
+
+@pytest.mark.asyncio
+async def test_second_post_served_from_cache(
+    plugin, monkeypatch, tmp_media, core
+):
+    """同一条链接第二次出现：直接发本地缓存，不解析也不下载。"""
+    calls = {"parse": 0, "download": 0}
+    _patch_cached_parsehub(
+        core,
+        monkeypatch,
+        tmp_media,
+        calls,
+        "https://www.bilibili.com/video/BV1yupv6YEuE/",
+    )
+    url = "https://b23.tv/3XdwepO"
+
+    first = FakeBot()
+    await plugin.handle_link(first, make_group_event(url), url)
+    assert calls == {"parse": 1, "download": 1}
+    assert [api for api, _ in first.calls].count("send_msg") > 0
+
+    second = FakeBot()
+    await plugin.handle_link(second, make_group_event(url), url)
+    assert calls == {"parse": 1, "download": 1}, "第二次不该再解析 / 下载"
+    sent = [kw["message"] for api, kw in second.calls if api == "send_msg"]
+    assert sent, "命中缓存也要把内容发出去"
+    assert any(
+        "pic.jpg" in seg.data.get("file", "") for msg in sent for seg in msg
+    )
+
+
+@pytest.mark.asyncio
+async def test_other_short_link_skips_download_via_cache(
+    plugin, monkeypatch, tmp_media, core
+):
+    """另一个短链指向同一作品：短链里没 ID 所以还得解析，但不再下载。"""
+    calls = {"parse": 0, "download": 0}
+    _patch_cached_parsehub(
+        core,
+        monkeypatch,
+        tmp_media,
+        calls,
+        "https://www.bilibili.com/video/BV1yupv6YEuE/",
+    )
+
+    first_url = "https://b23.tv/3XdwepO"
+    await plugin.handle_link(FakeBot(), make_group_event(first_url), first_url)
+    assert calls == {"parse": 1, "download": 1}
+
+    # 换个群：同群 120 秒内会被去重拦掉，那样就测不到缓存这一层了
+    other_url = "https://b23.tv/ZzZzZzZ"
+    second = FakeBot()
+    await plugin.handle_link(
+        second, make_group_event(other_url, group_id=654321), other_url
+    )
+    assert calls == {"parse": 2, "download": 1}, "只该多一次解析，不该再下载"
+    assert [api for api, _ in second.calls].count("send_msg") > 0
+
+
+@pytest.mark.asyncio
+async def test_cache_off_still_parses_and_downloads(
+    plugin, monkeypatch, tmp_media, core
+):
+    """关掉缓存后行为跟以前一样。"""
+    calls = {"parse": 0, "download": 0}
+    _patch_cached_parsehub(
+        core,
+        monkeypatch,
+        tmp_media,
+        calls,
+        "https://www.bilibili.com/video/BV1yupv6YEuE/",
+    )
+    monkeypatch.setattr(
+        plugin,
+        "MEDIA_CACHE",
+        plugin.mediacache.MediaCache(
+            tmp_media / "media", ttl_seconds=0, max_bytes=0
+        ),
+    )
+    url = "https://b23.tv/3XdwepO"
+    await plugin.handle_link(FakeBot(), make_group_event(url), url)
+    await plugin.handle_link(
+        FakeBot(), make_group_event(url, group_id=654321), url
+    )
+    assert calls == {"parse": 2, "download": 2}
 
 
 @pytest.mark.asyncio

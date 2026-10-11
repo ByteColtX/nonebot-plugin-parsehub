@@ -40,7 +40,7 @@ from nonebot.rule import Rule
 
 # 包内用相对导入：插件既可能作为已安装的包加载，也可能作为本地插件被放在
 # src/plugins 下（此时模块名带前缀），绝对自引用在后一种情况下会失败。
-from . import card, core, server, switches
+from . import card, core, mediacache, server, switches
 from .config import Config, plugin_config
 
 __plugin_meta__ = PluginMetadata(
@@ -115,6 +115,13 @@ DEDUPE = core.DedupeCache()
 # 按会话（群 / 私聊）记录的解析开关，落在插件数据目录里。
 SWITCHES = switches.SwitchStore(server.data_root() / "sessions.json")
 
+# 作品级媒体缓存：命中就直接发本地那份，不解析、不下载、不画卡。
+MEDIA_CACHE = mediacache.MediaCache(
+    server.cache_root() / mediacache.CACHE_DIR_NAME,
+    ttl_seconds=max(0, plugin_config.parsehub_cache_hours) * 3600,
+    max_bytes=max(0, plugin_config.parsehub_cache_max_mb) * _BYTES_PER_MEGABYTE,
+)
+
 # 「解析开关」命令能接受的参数写法。
 _ON_WORDS = frozenset({"开", "开启", "打开", "on", "true", "1"})
 _OFF_WORDS = frozenset({"关", "关闭", "关上", "off", "false", "0"})
@@ -136,6 +143,21 @@ class _RelayEndpoint:
 
 _ENDPOINT = _RelayEndpoint()
 _SEMAPHORE: asyncio.Semaphore | None = None
+
+
+@dataclass
+class _SentInfo:
+    """一次「卡片或文字」发送的结果，顺手带上内容好写进媒体缓存。
+
+    Attributes:
+        sent: 是否真的发出去了。
+        card: 发出去的卡片图路径，没出卡为 ``None``。
+        caption: 发出去的文字，没发文字为空串。
+    """
+
+    sent: bool = False
+    card: Path | None = None
+    caption: str = ""
 
 
 def _concurrency_limit() -> asyncio.Semaphore:
@@ -502,6 +524,13 @@ async def _parse_and_send(
         manual: 是否为命令触发。
         cfg: 当前插件配置。
     """
+    # 本地已经有这个作品的媒体就直接发，省掉解析、下载和画卡。
+    pre_key = core.content_key(url)
+    cached = MEDIA_CACHE.get(pre_key)
+    if cached is not None:
+        await _send_cached(bot, event, cached, cfg)
+        return
+
     if not await core.CLIENT.is_supported(url):
         if manual:
             await _send(bot, event, Message("这个链接 ParseHub 不支持。"))
@@ -542,12 +571,18 @@ async def _parse_and_send(
     # 解析结果里的 raw_url 是短链展开后的地址，用它再查一次去重：同一个作品换个
     # 写法（b23.tv/xxx 与 bilibili.com/video/BVxxx）在同一个会话里也只发一次。
     # 手动「解析」是明确要求，不做这层拦截。
+    post_key = core.content_key(getattr(result, "raw_url", "") or url)
     if not manual:
         window = max(0, cfg.parsehub_dedupe_seconds)
-        key = core.content_key(getattr(result, "raw_url", "") or url)
-        if DEDUPE.should_skip(_session_key(event), key, window):
-            logger.info(f"[parsehub] {key} 在本会话刚发过，跳过发送")
+        if DEDUPE.should_skip(_session_key(event), post_key, window):
+            logger.info(f"[parsehub] {post_key} 在本会话刚发过，跳过发送")
             return
+
+    # 短链没命中缓存（缓存里记的是展开后的 key），解析完再查一次：命中就省掉下载
+    cached = MEDIA_CACHE.get(post_key)
+    if cached is not None:
+        await _send_cached(bot, event, cached, cfg)
+        return
 
     if not result.media:
         # 纯文字帖（比如 B 站动态）：没有媒体，只发卡片或文字
@@ -576,7 +611,7 @@ async def _parse_and_send(
 
     # 先出卡：thumb_url / 图片媒体通常够用，不必等下载。此时不发文字兜底，
     # 免得下载抽帧那一步白做
-    card_sent = await _send_card_or_text(
+    info = await _send_card_or_text(
         bot, event, result, display_name, [], None, cfg, allow_text=False
     )
 
@@ -586,8 +621,8 @@ async def _parse_and_send(
     task_dir, files = downloaded
 
     # 上面没出成卡（封面得从视频里抽帧）就带上下载好的文件再试一次
-    if not card_sent:
-        await _send_card_or_text(
+    if not info.sent:
+        info = await _send_card_or_text(
             bot, event, result, display_name, files, task_dir, cfg
         )
     if files:
@@ -595,6 +630,10 @@ async def _parse_and_send(
         logger.info(
             f"[parsehub] 已发送 {len(files)} 个文件，"
             f"临时目录 {task_dir}（稍后自动清理）"
+        )
+        # 存两份 key：短链那份让同一个短链下次直接命中，展开那份让别的写法也命中
+        MEDIA_CACHE.store(
+            (pre_key, post_key), files, card=info.card, caption=info.caption
         )
 
 
@@ -724,7 +763,7 @@ async def _send_card_or_text(
     cfg: Config,
     *,
     allow_text: bool = True,
-) -> bool:
+) -> _SentInfo:
     """优先发卡片图，卡片不可用时退回文字。
 
     Args:
@@ -739,7 +778,7 @@ async def _send_card_or_text(
             否则文字先发了，等下载完再抽帧出卡就成了重复消息。
 
     Returns:
-        发出去了（卡片或文字）为 ``True``。
+        发出去了什么（卡片路径 / 文字），用来写媒体缓存。
     """
     if cfg.parsehub_card:
         out_path = await _render_card(result, files, task_dir, cfg)
@@ -747,15 +786,64 @@ async def _send_card_or_text(
             url = server.RELAY.url_for(out_path, _ENDPOINT.host, _ENDPOINT.port)
             try:
                 await bot.send(event, MessageSegment.image(file=url))
-                return True
+                return _SentInfo(sent=True, card=out_path)
             except Exception as exc:  # noqa: BLE001 - 发图失败就退回文字
                 logger.warning(
                     f"[parsehub] 卡片发送失败: {type(exc).__name__}: {exc}"
                 )
     if allow_text and cfg.parsehub_send_text:
-        await _send(bot, event, _build_caption(result, display_name, cfg))
-        return True
-    return False
+        caption = _build_caption(result, display_name, cfg)
+        await _send(bot, event, caption)
+        return _SentInfo(sent=True, caption=caption.extract_plain_text())
+    return _SentInfo()
+
+
+async def _send_cached(
+    bot: Bot,
+    event: MessageEvent,
+    entry: Path,
+    cfg: Config,
+) -> bool:
+    """把缓存里的卡片 / 文字 + 媒体直接发出去。
+
+    缓存目录就在中转服务的根目录下，所以协议端能直接来拉，不用再复制一份。
+
+    Args:
+        bot: 当前 Bot 实例。
+        event: 触发消息事件。
+        entry: 缓存条目目录。
+        cfg: 当前插件配置。
+
+    Returns:
+        发出去了为 ``True``。
+    """
+    files = mediacache.MediaCache.media_files(entry)
+    if not files:
+        return False
+
+    card = mediacache.MediaCache.card_path(entry)
+    if cfg.parsehub_card and card is not None:
+        url = server.RELAY.url_for(card, _ENDPOINT.host, _ENDPOINT.port)
+        try:
+            await bot.send(event, MessageSegment.image(file=url))
+        except Exception as exc:  # noqa: BLE001 - 发图失败就退回文字
+            logger.warning(
+                f"[parsehub] 缓存卡片发送失败: {type(exc).__name__}: {exc}"
+            )
+            card = None
+    if card is None and cfg.parsehub_send_text:
+        caption = mediacache.MediaCache.caption_path(entry)
+        if caption is not None:
+            try:
+                await _send(bot, event, Message(caption.read_text("utf-8")))
+            except OSError as exc:
+                logger.warning(f"[parsehub] 缓存文字读不出来: {exc}")
+
+    logger.info(
+        f"[parsehub] 命中媒体缓存，直接发送 {len(files)} 个文件（{entry.name}）"
+    )
+    await _send_media_files(bot, event, files)
+    return True
 
 
 def _session_key(event: MessageEvent) -> str:
@@ -1005,7 +1093,12 @@ async def _sweep_expired_media() -> None:
         await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
         try:
             keep_seconds = plugin_config.parsehub_keep_minutes * 60
-            removed = server.RELAY.cleanup(keep_seconds)
+            removed = server.RELAY.cleanup(
+                keep_seconds, skip={mediacache.CACHE_DIR_NAME}
+            )
+            expired = MEDIA_CACHE.sweep()
+            if expired:
+                logger.info(f"[parsehub] 媒体缓存清理了 {expired} 个作品")
         except OSError as exc:
             logger.warning(f"[parsehub] 清理失败: {exc}")
             continue

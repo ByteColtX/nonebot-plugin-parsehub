@@ -65,6 +65,24 @@ def switches(plugin):
     return plugin.switches
 
 
+@pytest.fixture(scope="session")
+def mediacache(plugin):
+    """插件的 mediacache 子模块。"""
+    return plugin.mediacache
+
+
+@pytest.fixture(autouse=True)
+def _clean_media_cache(plugin, monkeypatch, tmp_path):
+    """每个测试一份独立的媒体缓存，别写进仓库目录、也别互相命中。"""
+    monkeypatch.setattr(
+        plugin,
+        "MEDIA_CACHE",
+        plugin.mediacache.MediaCache(
+            tmp_path / "media", ttl_seconds=24 * 3600, max_bytes=1024**3
+        ),
+    )
+
+
 @pytest.fixture(autouse=True)
 def _clean_dedupe(plugin, monkeypatch):
     """每个测试用一份干净的去重缓存，免得用例之间互相跳过。"""
