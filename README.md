@@ -48,6 +48,7 @@ pip install nonebot-plugin-parsehub
 | `PARSEHUB_CARD` | bool | `true` | 是否发信息卡片图（失败自动退回文字） |
 | `PARSEHUB_CARD_FONT` | str | 空 | 中文字体路径，留空则自动找系统字体 / 下载 |
 | `PARSEHUB_CARD_FONT_URL` | str | 空 | 字体下载地址，留空用内置镜像 |
+| `PARSEHUB_FORWARD_TIMEOUT` | int | `60` | 合并转发等协议端的秒数，超时才逐条发 |
 | `PARSEHUB_SEND_TEXT` | bool | `true` | 是否发送标题 / 正文 |
 | `PARSEHUB_MAX_CHARS` | int | `300` | 正文最多发送多少字符 |
 | `PARSEHUB_FAIL_NOTICE` | bool | `true` | 视频发送失败时是否额外发文字提示 |

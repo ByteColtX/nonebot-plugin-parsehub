@@ -439,6 +439,8 @@ async def test_handle_link_multi_media_uses_forward(
     assert apis.count("send_msg") == 1, apis  # 只有标题那条文字，图片不单独发
     fwd = dict(bot.calls)["send_group_forward_msg"]
     assert fwd["group_id"] == 123456
+    # 协议端抓一遍 URL 再上传很慢，必须显式给一个宽限，否则 30s 就被掐断
+    assert fwd["_timeout"] == plugin.plugin_config.parsehub_forward_timeout
     assert len(fwd["messages"]) == 3
     assert all(
         n["type"] == "node" and n["data"]["content"][0]["type"] == "image"

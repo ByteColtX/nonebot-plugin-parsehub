@@ -50,6 +50,10 @@ class Config(BaseModel):
         parsehub_card_font_url: 字体下载地址，留空则用内置的几个镜像。
         parsehub_send_text: 是否发送标题与正文文字。
         parsehub_max_chars: 正文最多发送的字符数。
+        parsehub_forward_timeout: 合并转发等待协议端的秒数。协议端要把节点里的
+            每个 URL 都抓一遍再上传，健康时 6-7 秒，但它在忙别的消息时会明显变慢
+            （实测超过 nonebot 默认的 30 秒上限被掐断）。这里给足余量，
+            真超时了才退回逐条发送。
         parsehub_fail_notice: 视频发送失败时是否额外发一条文字提示。
         parsehub_files_host: 媒体中转服务对外的地址，留空则自动探测内网 IP。
         parsehub_files_port: 媒体中转服务的端口。
@@ -79,6 +83,7 @@ class Config(BaseModel):
     parsehub_card_font_url: str = ""
     parsehub_send_text: bool = True
     parsehub_max_chars: int = 300
+    parsehub_forward_timeout: int = 60
     parsehub_fail_notice: bool = True
 
     # ---- 媒体中转服务 ----

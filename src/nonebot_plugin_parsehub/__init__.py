@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -329,24 +330,34 @@ async def _send_forward(
             }
         )
 
+    timeout = max(1, plugin_config.parsehub_forward_timeout)
+    started = time.monotonic()
     try:
         if isinstance(event, GroupMessageEvent):
             await bot.call_api(
                 "send_group_forward_msg",
                 group_id=event.group_id,
                 messages=nodes,
+                _timeout=timeout,
             )
         else:
             await bot.call_api(
                 "send_private_forward_msg",
                 user_id=event.user_id,
                 messages=nodes,
+                _timeout=timeout,
             )
     except Exception as exc:  # noqa: BLE001 - 协议端可能不支持合并转发
-        logger.warning(f"[parsehub] 合并转发失败，改逐条发送: {exc}")
+        logger.warning(
+            f"[parsehub] 合并转发失败（等了 {time.monotonic() - started:.1f}s，"
+            f"上限 {timeout}s），改逐条发送: {exc}"
+        )
         return False
 
-    logger.info(f"[parsehub] 已合并转发 {len(nodes)} 条")
+    logger.info(
+        f"[parsehub] 已合并转发 {len(nodes)} 条"
+        f"（耗时 {time.monotonic() - started:.1f}s）"
+    )
     return True
 
 
