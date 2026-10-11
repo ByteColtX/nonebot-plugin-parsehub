@@ -6,7 +6,7 @@
 [![uv](https://img.shields.io/badge/package%20manager-uv-black?style=flat-square&logo=uv)](https://github.com/astral-sh/uv)
 
 [![ruff](https://img.shields.io/badge/code%20style-ruff-black?style=flat-square&logo=ruff)](https://github.com/astral-sh/ruff)
-[![tests](https://img.shields.io/badge/tests-109%20passed-brightgreen?style=flat-square)](https://github.com/ByteColtX/nonebot-plugin-parsehub)
+[![CI](https://github.com/ByteColtX/nonebot-plugin-parsehub/actions/workflows/ci.yml/badge.svg)](https://github.com/ByteColtX/nonebot-plugin-parsehub/actions/workflows/ci.yml)
 
 ## 📖 介绍
 

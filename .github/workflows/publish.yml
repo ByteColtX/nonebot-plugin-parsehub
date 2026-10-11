@@ -1,8 +1,10 @@
 name: Publish to PyPI
 
 on:
-  release:
-    types: [published]
+  # 打 tag（v0.1.0 这种）就发布，和官方模板的 release 工作流一致
+  push:
+    tags:
+      - v*
   # 手动触发：发布失败或想重发时用（Actions → Publish to PyPI → Run workflow）
   workflow_dispatch:
 
@@ -14,8 +16,8 @@ jobs:
       - uses: actions/checkout@v7
       # setup-uv 没有 v8/v9/v10 的浮动大版本 tag，必须写完整版本号
       - uses: astral-sh/setup-uv@v10.3.0
-      - name: 安装依赖
-        run: uv sync --all-groups
+      - name: 安装依赖（严格按 uv.lock）
+        run: uv sync --locked --all-groups
       - name: 跑测试
         run: uv run pytest -q
       - name: 代码检查
@@ -29,10 +31,30 @@ jobs:
     environment: pypi
     permissions:
       id-token: write # PyPI Trusted Publishing（OIDC 换一次性 token，不需要 API token）
+      contents: write # 把构建产物挂到 GitHub Release
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
+
+      - name: 校验 tag 与 pyproject 版本一致
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="v$(uv version --short)"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag $tag 与 pyproject.toml 里的版本 $version 不一致"
+            exit 1
+          fi
+          echo "版本一致：$tag"
+
       - name: 构建 sdist + wheel
         run: uv build
+
       - name: 发布到 PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: 把构建产物挂到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: gh release upload --clobber "${GITHUB_REF#refs/tags/}" dist/*.tar.gz dist/*.whl
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
