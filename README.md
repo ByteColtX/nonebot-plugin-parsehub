@@ -25,6 +25,16 @@
 - **时长保护**：视频超过 `PARSEHUB_MAX_SECONDS`（默认 5 分钟）时不下载，只发封面卡片 + 一句「视频太长啦，还是去 xx 看吧」
 - **媒体缓存**：同一作品 24 小时内再出现，直接发本地那份，不再解析下载
 
+## 效果图
+
+B 站视频卡片：
+
+![B 站卡片](https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-bilibili.jpg)
+
+小红书视频卡片：
+
+![小红书卡片](https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-xiaohongshu.jpg)
+
 ## 安装
 
 使用 nb-cli（推荐）：
