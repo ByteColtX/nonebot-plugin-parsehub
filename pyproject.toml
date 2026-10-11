@@ -1,0 +1,85 @@
+[project]
+name = "nonebot-plugin-parsehub"
+version = "0.1.0"
+description = "基于 ParseHub 的社交媒体链接解析插件：群里出现分享链接时自动解析并发送媒体"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "ByteColtX", email = "umk@live.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["nonebot", "nonebot2", "plugin", "parsehub", "parser", "media", "onebot"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Framework :: NoneBot",
+  "Operating System :: OS Independent",
+  "Topic :: Communications :: Chat",
+]
+dependencies = [
+  "httpx>=0.28.0,<1.0.0",
+  "nonebot-adapter-onebot>=2.4.6,<3.0.0",
+  "nonebot-plugin-localstore>=0.7.4,<1.0.0",
+  "nonebot2>=2.5.0,<3.0.0",
+  "parsehub>=2.3.3,<3.0.0",
+  "pydantic>=2.0.0,<3.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ByteColtX/nonebot-plugin-parsehub"
+Repository = "https://github.com/ByteColtX/nonebot-plugin-parsehub.git"
+Issues = "https://github.com/ByteColtX/nonebot-plugin-parsehub/issues"
+
+[dependency-groups]
+dev = [
+  { include-group = "test" },
+  "nonebot2[fastapi]>=2.5.0,<3.0.0",
+  "poethepoet>=0.42.1",
+  "ruff>=0.15.2,<1.0.0",
+]
+test = [
+  "nonebot-adapter-onebot>=2.4.6,<3.0.0",
+  "nonebot2[fastapi]>=2.5.0,<3.0.0",
+  "nonebug>=0.4.4,<1.0.0",
+  "pytest>=9.0.2,<10.0.0",
+  "pytest-asyncio>=1.3.0,<2.0.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.0"]
+build-backend = "uv_build"
+
+[tool.nonebot]
+plugins = ["nonebot_plugin_parsehub"]
+
+[tool.poe.tasks]
+test = "pytest -q"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 80
+target-version = "py312"
+
+[tool.ruff.lint]
+# Google Python Style Guide 的机械部分：命名、文档字符串、导入排序。
+select = ["E", "W", "F", "I", "B", "C4", "UP", "D", "N"]
+ignore = [
+  "B008",  # pydantic 的 Field(...) 必须写在默认值位置
+  "C901",  # 复杂度过高：解析结果的组装确实偏长
+  "D203",  # 与 D211 冲突，Google 风格用 D211
+  "D213",  # 与 D212 冲突，Google 风格用 D212
+  "N818",  # 异常类名不强制以 Error 结尾
+  "D415",  # 中文文档字符串以「。」结尾，不用 ASCII 句点
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# 测试函数名本身就是说明，不强制写完整文档字符串
+"tests/**" = ["D", "E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nonebot_plugin_parsehub"]

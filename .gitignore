@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.prod
+.env.dev
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+junit.xml
+coverage.xml
+.localstore/
+
+# 测试时 LOCALSTORE_USE_CWD=true 会在这里落文件
+cache/

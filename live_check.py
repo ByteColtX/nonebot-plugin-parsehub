@@ -1,0 +1,80 @@
+# Copyright 2026 ByteColtX
+# SPDX-License-Identifier: MIT
+
+"""真实链路自检：解析 → 下载 → 通过中转服务取回。
+
+用法::
+
+    uv run python live_check.py [url] [proxy]
+
+需要联网；在本机和 onecloud 上都能跑，onecloud 上要带 ``LD_LIBRARY_PATH``
+和机器人所在 venv 的解释器。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+import httpx
+import nonebot
+
+# 插件的配置类依赖 NoneBot 已初始化；媒体目录交给 localstore 管理。
+nonebot.init(parsehub_files_port=18899)
+nonebot.load_plugin("nonebot_plugin_localstore")
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+
+from nonebot_plugin_parsehub import core, server  # noqa: E402
+
+_DEFAULT_URL = "https://www.bilibili.com/video/BV1GJ411x7h7"
+_CHECK_PORT = 18899
+_BYTES_PER_MEGABYTE = 1024 * 1024
+
+URL = sys.argv[1] if len(sys.argv) > 1 else _DEFAULT_URL
+PROXY = sys.argv[2] if len(sys.argv) > 2 else ""
+
+
+async def main() -> int:
+    """跑一遍解析 → 下载 → 中转取回的完整链路。
+
+    Returns:
+        进程退出码，0 表示链路正常。
+    """
+    print("== 1. 加载 parsehub ==")
+    platforms = await core.CLIENT.platforms()
+    print(f"   平台数: {len(platforms)}")
+    print(f"   平台 id: {await core.CLIENT.platform_id(URL)}")
+
+    print("== 2. 解析 ==")
+    result = await core.CLIENT.parse(URL, PROXY)
+    display_name = result.platform.display_name if result.platform else "?"
+    print(f"   {display_name} / {result.title}")
+
+    print("== 3. 下载 ==")
+    task_dir = server.RELAY.new_task_dir()
+    downloaded = await core.CLIENT.download(URL, str(task_dir), PROXY)
+    media = downloaded.media
+    media_list = list(media) if isinstance(media, (list, tuple)) else [media]
+    files = [Path(item.path) for item in media_list]
+    for path in files:
+        size = path.stat().st_size / _BYTES_PER_MEGABYTE
+        print(f"   {path.name}  {size:.1f} MB")
+
+    print("== 4. 中转服务取回 ==")
+    port = server.RELAY.start("0.0.0.0", _CHECK_PORT)
+    url = server.RELAY.url_for(files[0], "127.0.0.1", port)
+    print(f"   {url}")
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url)
+    expected = files[0].stat().st_size
+    ok = response.status_code == 200 and len(response.content) == expected
+    print(f"   HTTP {response.status_code}, {len(response.content)} bytes")
+    print("== 结果:", "PASS" if ok else "FAIL", "==")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main()))
