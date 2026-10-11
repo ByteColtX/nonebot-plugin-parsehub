@@ -3,6 +3,8 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  # 手动触发：发布失败或想重发时用（Actions → Publish to PyPI → Run workflow）
+  workflow_dispatch:
 
 jobs:
   test:
@@ -10,7 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv 没有 v8/v9/v10 的浮动大版本 tag，必须写完整版本号
+      - uses: astral-sh/setup-uv@v10.3.0
       - name: 安装依赖
         run: uv sync --all-groups
       - name: 跑测试
@@ -28,7 +31,7 @@ jobs:
       id-token: write # PyPI Trusted Publishing（OIDC 换一次性 token，不需要 API token）
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0
       - name: 构建 sdist + wheel
         run: uv build
       - name: 发布到 PyPI
