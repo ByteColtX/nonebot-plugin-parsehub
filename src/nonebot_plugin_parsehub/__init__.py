@@ -212,6 +212,14 @@ _ON_WORDS = frozenset({"开", "开启", "打开", "on", "true", "1"})
 _OFF_WORDS = frozenset({"关", "关闭", "关上", "off", "false", "0"})
 _STATUS_WORDS = frozenset({"状态", "status"})
 
+# 视频过长提示里「去 xx 看吧」用的平台名：平台展示名不一定适合念出来。
+_WATCH_NAMES: dict[str, str] = {
+    "bilibili": "B 站",
+    "twitter": "X",
+    "weixin": "微信",
+    "wechat": "微信",
+}
+
 
 @dataclass
 class _RelayEndpoint:
@@ -684,6 +692,28 @@ async def _parse_and_send(
         await _send_cached(bot, event, cached, cfg)
         return
 
+    # 视频太长就只给封面 + 一句提示，别为几百 MB 的长片付下载和发送的代价。
+    # 判断放在缓存之前：缓存里可能存着加限制之前的旧条目。
+    max_seconds = max(0, cfg.parsehub_max_seconds)
+    seconds = card.video_seconds(result) if max_seconds else 0
+    if max_seconds and seconds > max_seconds:
+        logger.info(
+            f"[parsehub] 视频 {card.format_duration(seconds)} 超过时长上限 "
+            f"{card.format_duration(max_seconds)}，只发封面"
+        )
+        await _send_card_or_text(
+            bot, event, result, display_name, [], None, cfg
+        )
+        await _send(
+            bot,
+            event,
+            Message(
+                f"视频太长啦，还是去{_watch_name(result, display_name)}看吧"
+            ),
+        )
+        await _react(bot, event, REACT_OK)
+        return
+
     if not result.media:
         # 纯文字帖（比如 B 站动态）：没有媒体，只发卡片或文字
         await _send_card_or_text(
@@ -735,6 +765,22 @@ async def _parse_and_send(
         MEDIA_CACHE.store(
             (pre_key, post_key), files, card=info.card, caption=info.caption
         )
+
+
+def _watch_name(result: object, display_name: str) -> str:
+    """拼「还是去 xx 看吧」这句提示用的平台名。
+
+    Args:
+        result: ParseHub 解析结果。
+        display_name: 平台展示名，作为兜底。
+
+    Returns:
+        适合念出来的平台名，例如 ``B 站``。
+    """
+    platform_id = str(
+        getattr(getattr(result, "platform", None), "id", "")
+    ).lower()
+    return _WATCH_NAMES.get(platform_id) or display_name or "原平台"
 
 
 def _build_caption(result: object, display_name: str, cfg: Config) -> Message:

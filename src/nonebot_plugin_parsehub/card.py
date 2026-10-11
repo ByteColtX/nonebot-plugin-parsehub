@@ -361,6 +361,54 @@ def format_duration(seconds: int, *, is_ms: bool = False) -> str:
     return f"{minutes:02d}:{sec:02d}"
 
 
+def platform_uses_milliseconds(result: Any) -> bool:  # noqa: ANN401
+    """该平台的 ``duration`` 是不是毫秒。
+
+    Args:
+        result: ParseHub 解析结果。
+
+    Returns:
+        抖音 / TikTok / 小红书返回 True。
+    """
+    platform_id = str(getattr(getattr(result, "platform", None), "id", ""))
+    return platform_id.lower() in _MS_PLATFORMS
+
+
+def video_seconds(result: Any) -> int:  # noqa: ANN401
+    """取结果里最长媒体的时长（秒）。
+
+    上游单位不统一：毫秒（抖音 / TikTok / 小红书）要除 1000；另外把明显过大的
+    值（> 3 小时）也当毫秒处理，与 :func:`format_duration` 的显示规则一致。
+    拿不到时长时返回 0，调用方据此跳过时长判断。
+
+    Args:
+        result: ParseHub 解析结果。
+
+    Returns:
+        最长媒体的时长（秒）；无法判断时返回 0。
+    """
+    media = getattr(result, "media", None)
+    items = [
+        item
+        for item in (
+            list(media) if isinstance(media, (list, tuple)) else [media]
+        )
+        if item
+    ]
+    longest = 0
+    for item in items:
+        try:
+            value = int(getattr(item, "duration", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        longest = max(longest, value)
+    if longest <= 0:
+        return 0
+    if platform_uses_milliseconds(result) or longest > 10800:
+        return longest // 1000
+    return longest
+
+
 def platform_of(result: Any) -> tuple[str, tuple[int, int, int], str]:  # noqa: ANN401
     """取平台展示名、品牌色和 logo 名。
 
@@ -692,8 +740,7 @@ def render(
         )
         if item
     ]
-    platform_id = str(getattr(getattr(result, "platform", None), "id", ""))
-    is_ms = platform_id.lower() in _MS_PLATFORMS
+    is_ms = platform_uses_milliseconds(result)
 
     cover_image = Image.open(io.BytesIO(cover)).convert("RGB")
 
