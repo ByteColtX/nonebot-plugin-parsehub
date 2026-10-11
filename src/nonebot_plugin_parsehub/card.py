@@ -29,8 +29,9 @@ logger = logging.getLogger("nonebot_plugin_parsehub.card")
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets" / "logos"
 
-# 抖音 / TikTok 的 duration 是毫秒，其它平台是秒。
-_MS_PLATFORMS = frozenset({"douyin", "tiktok"})
+# duration 单位上游各平台不统一：抖音 / TikTok / 小红书给的是毫秒，其它是秒。
+# 新平台若时长明显偏大（8 秒视频显示 2 小时），下载媒体用 cv2 量真实时长核对。
+_MS_PLATFORMS = frozenset({"douyin", "tiktok", "xhs"})
 
 # 中文字体候选下载地址（按顺序尝试）。
 FONT_URLS: tuple[str, ...] = (
@@ -54,17 +55,25 @@ SYSTEM_FONTS: tuple[str, ...] = (
 )
 
 # 平台 → (展示名, 品牌色, logo 文件名)
+# key 用 parsehub 的 platform.id（xhs/coolapk/… 都是它的原始 id）。
 PLATFORMS: dict[str, tuple[str, tuple[int, int, int], str]] = {
     "bilibili": ("bilibili", (251, 114, 153), "bilibili"),
     "douyin": ("抖音", (254, 44, 85), "douyin"),
     "xiaohongshu": ("小红书", (255, 36, 66), "xiaohongshu"),
+    "xhs": ("小红书", (255, 36, 66), "xiaohongshu"),
     "weibo": ("微博", (230, 22, 45), "weibo"),
     "zhihu": ("知乎", (0, 132, 255), "zhihu"),
     "kuaishou": ("快手", (255, 73, 6), "kuaishou"),
+    "pipix": ("皮皮虾", (255, 90, 45), "pipix"),
     "tieba": ("贴吧", (41, 50, 225), "baidu"),
     "baidu": ("百度", (41, 50, 225), "baidu"),
     "weixin": ("微信", (7, 193, 96), "wechat"),
     "wechat": ("微信", (7, 193, 96), "wechat"),
+    "weixin_channels": ("微信视频号", (250, 157, 59), "wechat"),
+    "toutiao": ("今日头条", (255, 55, 60), "toutiao"),
+    "coolapk": ("酷安", (17, 178, 101), "coolapk"),
+    "xiaoheihe": ("小黑盒", (26, 26, 32), "xiaoheihe"),
+    "zuiyou": ("最右", (255, 196, 0), "zuiyou"),
     "x": ("X", (255, 255, 255), "x"),
     "twitter": ("X", (255, 255, 255), "x"),
     "youtube": ("YouTube", (255, 0, 0), "youtube"),
