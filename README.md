@@ -31,9 +31,9 @@ B 站视频卡片：
 
 ![B 站卡片](https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-bilibili.jpg)
 
-小红书视频卡片：
+抖音图集卡片：
 
-![小红书卡片](https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-xiaohongshu.jpg)
+![抖音卡片](https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-douyin.jpg)
 
 ## 安装
 
