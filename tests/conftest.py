@@ -66,6 +66,12 @@ def switches(plugin):
 
 
 @pytest.fixture(autouse=True)
+def _clean_dedupe(plugin, monkeypatch):
+    """每个测试用一份干净的去重缓存，免得用例之间互相跳过。"""
+    monkeypatch.setattr(plugin, "DEDUPE", plugin.core.DedupeCache())
+
+
+@pytest.fixture(autouse=True)
 def _clean_switches(plugin, monkeypatch, tmp_path):
     """每个测试用一份独立的解析开关，避免用例之间互相影响。"""
     monkeypatch.setattr(

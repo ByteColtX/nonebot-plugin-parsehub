@@ -256,6 +256,36 @@ def test_dedupe_window(plugin):
     assert plugin.DEDUPE.should_skip("group:1", url, 0) is False  # 0 = 不去重
 
 
+def test_content_key_normalises_platform_ids(plugin, core):
+    """同一个作品的不同写法归一成同一个 key（下面几条是实测出来的真实地址）。"""
+    # 抖音：短链展开后 ParseHub 给的 raw_url 就长这样
+    share = "https://www.iesdouyin.com/share/video/7695216850086505892/"
+    assert core.content_key(share) == "douyin:7695216850086505892"
+    assert (
+        core.content_key(share + "?from_ssr=1&did=MS4wLjABAAAA")
+        == "douyin:7695216850086505892"
+    )
+    assert core.content_key(share.rstrip("/")) == core.content_key(share)
+
+    # B 站：移动端 / 带一堆追踪参数 / 末尾斜杠，都是同一个视频
+    bv = core.content_key("https://www.bilibili.com/video/BV1yupv6YEuE/")
+    assert bv == "bilibili:bv1yupv6yeue"
+    assert core.content_key("https://www.bilibili.com/video/BV1yupv6YEuE") == bv
+    assert (
+        core.content_key("https://m.bilibili.com/video/BV1yupv6YEuE?p=1") == bv
+    )
+    assert (
+        core.content_key("https://b23.tv/3XdwepO") != bv
+    )  # 短链只能等解析展开
+
+
+def test_content_key_falls_back_to_host_and_path(plugin, core):
+    """认不出 ID 的链接退化成「主机 + 路径」，丢掉查询串。"""
+    key = core.content_key("https://b23.tv/3XdwepO")
+    assert key == "b23.tv/3xdwepo"
+    assert core.content_key("https://b23.tv/3XdwepO?share=1") == key
+
+
 def test_dedupe_is_per_session(plugin):
     """跨会话不去重：同一个链接换个群 / 私聊照样解析。"""
     url = "https://b23.tv/a"
@@ -365,6 +395,63 @@ async def test_handle_link_sends_card_before_media(
     assert "card.jpg" in sent[0][0].data["file"]
     assert "pic.jpg" in sent[1][0].data["file"]
     assert bot.sent_texts == ["", ""], "出了卡就不该再发文字"
+
+
+@pytest.mark.asyncio
+async def test_same_video_other_url_form_is_skipped(
+    plugin, monkeypatch, tmp_media, core
+):
+    """短链和完整链是同一个作品：同一会话里只发一次，换个会话照发。"""
+    img = tmp_media / "pic.jpg"
+    img.write_bytes(b"x" * 1024)
+
+    async def fake_parse(url, proxy="", cookie=""):
+        # 两种写法解析出来是同一个作品，raw_url 也归一成同一个
+        return FakeParseResult(
+            media=FakeMediaRef("https://cdn.example.com/pic.jpg", "jpg"),
+            raw_url="https://www.bilibili.com/video/BV1yupv6YEuE/",
+        )
+
+    async def fake_download(url, path, proxy="", cookie=""):
+        return FakeDownloadResult([img])
+
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+    monkeypatch.setattr(core.CLIENT, "download", fake_download)
+    monkeypatch.setattr(
+        core,
+        "probe_size",
+        lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
+    )
+
+    short = "https://b23.tv/3XdwepO"
+    full = "https://www.bilibili.com/video/BV1yupv6YEuE"
+
+    first = FakeBot()
+    await plugin.handle_link(first, make_group_event(short), short)
+    assert [api for api, _ in first.calls].count("send_msg") > 0
+
+    second = FakeBot()
+    await plugin.handle_link(second, make_group_event(full), full)
+    assert [api for api, _ in second.calls].count("send_msg") == 0, (
+        "同一个作品的另一种写法不该再发一次"
+    )
+    # 仍然给「收到」的回应，免得看起来像没反应
+    assert plugin.REACT_START in [
+        kw["emoji_id"]
+        for api, kw in second.calls
+        if api == "set_msg_emoji_like"
+    ]
+
+    third = FakeBot()
+    await plugin.handle_link(
+        third, make_group_event(full, group_id=654321), full
+    )
+    assert [api for api, _ in third.calls].count("send_msg") > 0, (
+        "换个会话就该照常解析"
+    )
 
 
 @pytest.mark.asyncio

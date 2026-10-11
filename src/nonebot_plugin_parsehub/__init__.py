@@ -539,6 +539,16 @@ async def _parse_and_send(
     title = result.title or "(无标题)"
     logger.info(f"[parsehub] {display_name} 解析成功: {url} -> {title}")
 
+    # 解析结果里的 raw_url 是短链展开后的地址，用它再查一次去重：同一个作品换个
+    # 写法（b23.tv/xxx 与 bilibili.com/video/BVxxx）在同一个会话里也只发一次。
+    # 手动「解析」是明确要求，不做这层拦截。
+    if not manual:
+        window = max(0, cfg.parsehub_dedupe_seconds)
+        key = core.content_key(getattr(result, "raw_url", "") or url)
+        if DEDUPE.should_skip(_session_key(event), key, window):
+            logger.info(f"[parsehub] {key} 在本会话刚发过，跳过发送")
+            return
+
     if not result.media:
         # 纯文字帖（比如 B 站动态）：没有媒体，只发卡片或文字
         await _send_card_or_text(
@@ -957,7 +967,7 @@ async def _handle_auto(bot: Bot, event: MessageEvent) -> None:
     session = _session_key(event)
     window = max(0, plugin_config.parsehub_dedupe_seconds)
     for url in urls[:_MAX_LINKS_PER_MESSAGE]:
-        if DEDUPE.should_skip(session, url, window):
+        if DEDUPE.should_skip(session, core.content_key(url), window):
             continue
         await handle_link(bot, event, url)
 

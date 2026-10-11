@@ -226,6 +226,56 @@ async def probe_size(
     return int(tail) if tail.isdigit() else None
 
 
+# 平台内容的 ID 特征：命中就能把同一个作品的各种写法归一成同一个 key。
+# 顺序有意义，更具体的排前面（BV 号优先于 /video/ 里的数字）。
+_ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("bilibili", re.compile(r"(BV[0-9A-Za-z]{10})")),
+    ("bilibili", re.compile(r"/av(\d+)")),
+    ("douyin", re.compile(r"/video/(\d{6,})")),
+    ("douyin", re.compile(r"/note/(\d{6,})")),
+    ("douyin", re.compile(r"[?&]modal_id=(\d{6,})")),
+    ("kuaishou", re.compile(r"/(?:short-video|fw/photo)/([0-9A-Za-z_-]+)")),
+    ("xiaohongshu", re.compile(r"/(?:explore|discovery/item)/([0-9A-Za-z]+)")),
+    ("weibo", re.compile(r"/(?:detail|status)/([0-9A-Za-z]+)")),
+    ("youtube", re.compile(r"youtu\.be/([0-9A-Za-z_-]{11})")),
+    ("youtube", re.compile(r"[?&]v=([0-9A-Za-z_-]{11})")),
+    ("twitter", re.compile(r"/status(?:es)?/(\d+)")),
+    ("instagram", re.compile(r"/(?:p|reel|tv)/([0-9A-Za-z_-]+)")),
+)
+
+# 归一化时要去掉的主机名前缀（m.bilibili.com 与 www.bilibili.com 是同一个站）。
+_HOST_PREFIXES = ("www.", "m.", "mobile.")
+
+
+def content_key(url: str) -> str:
+    """把链接归一化成去重用的 key（纯字符串处理，不发请求）。
+
+    认得出作品 ID 的平台直接用 ``平台:id``，这样同一个作品的两种写法能对上——比如
+    抖音的 ``v.douyin.com/xxx`` 和 ``iesdouyin.com/share/video/<id>``、B 站的
+    ``b23.tv/xxx`` 和 ``bilibili.com/video/BVxxxx``（解析结果里的 ``raw_url``
+    已经是短链展开后的地址）。认不出来的退化成「主机 + 路径」，丢掉查询串和末尾
+    斜杠。
+
+    Args:
+        url: 链接，可以是用户发的原始链接，也可以是 ParseHub 给的 ``raw_url``。
+
+    Returns:
+        归一化后的 key。
+    """
+    for name, pattern in _ID_PATTERNS:
+        match = pattern.search(url)
+        if match:
+            return f"{name}:{match.group(1).lower()}"
+
+    parsed = urlsplit(url)
+    host = parsed.netloc.lower()
+    for prefix in _HOST_PREFIXES:
+        if host.startswith(prefix):
+            host = host[len(prefix) :]
+            break
+    return f"{host}{parsed.path.rstrip('/')}".lower()
+
+
 class DedupeCache:
     """同一链接在同一个会话里、时间窗口内只处理一次。
 
