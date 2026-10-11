@@ -770,6 +770,11 @@ async def test_handle_link_multi_media_uses_forward(
     # 协议端抓一遍 URL 再上传很慢，必须显式给一个宽限，否则 30s 就被掐断
     assert fwd["_timeout"] == plugin.plugin_config.parsehub_forward_timeout
     assert len(fwd["messages"]) == 3
+    # 节点名跟随 NICKNAME（测试环境没配，退回默认值）
+    assert all(
+        n["data"]["name"] == plugin._forward_node_name()
+        for n in fwd["messages"]
+    )
     assert all(
         n["type"] == "node" and n["data"]["content"][0]["type"] == "image"
         for n in fwd["messages"]

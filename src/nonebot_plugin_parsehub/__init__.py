@@ -21,8 +21,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from nonebot import get_driver, logger, on_command, on_message
@@ -65,8 +68,66 @@ REACT_START = "424"  # 收到链接，立即回应
 REACT_OK = "144"  # 视频发送成功
 REACT_FAIL = "5"  # 视频发送失败
 
-# 合并转发里显示的节点名。
-_FORWARD_NODE_NAME = "ParseHub"
+
+# 合并转发里显示的节点名取自 NICKNAME 的第一项。
+# nonebot 把 NICKNAME 解析成 set，顺序会丢，所以这里读原始配置值，保证显示稳定
+# （否则每次重启昵称都可能变），读不到才退回配置集合里的第一个。
+def _configured_nicknames() -> list[str]:
+    """按 .env 里的书写顺序读出机器人昵称。
+
+    Returns:
+        昵称列表；读不到时为 ``[]``。
+    """
+    raw = os.environ.get("NICKNAME", "").strip()
+    candidates = [raw] if raw else []
+    if not candidates:
+        env_files = get_driver().config.model_config.get("env_file") or ()
+        if isinstance(env_files, str):
+            env_files = (env_files,)
+        for name in env_files:
+            try:
+                text = Path(str(name)).read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                key, sep, value = line.partition("=")
+                if sep and key.strip() == "NICKNAME":
+                    candidates.append(value.strip())
+                    break
+            if candidates:
+                break
+
+    for value in candidates:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:  # 不是 JSON：按逗号切，去掉注释和引号
+            plain = value.split("#", 1)[0].strip()
+            parsed = [item.strip().strip("\"'") for item in plain.split(",")]
+        if isinstance(parsed, str):
+            parsed = [parsed]
+        if not isinstance(parsed, list):
+            continue
+        names = [
+            item.strip()
+            for item in parsed
+            if isinstance(item, str) and item.strip()
+        ]
+        if names:
+            return names
+
+    return sorted(get_driver().config.nickname)
+
+
+@lru_cache(maxsize=1)
+def _forward_node_name() -> str:
+    """合并转发节点上显示的名字。
+
+    Returns:
+        ``NICKNAME`` 的第一项；完全没配昵称时退回 ``"ParseHub"``。
+    """
+    names = _configured_nicknames()
+    return names[0] if names else "ParseHub"
+
 
 # 判断媒体类型用的后缀集合。
 _IMAGE_EXTENSIONS = frozenset(
@@ -374,7 +435,7 @@ async def _send_forward(
                 "type": "node",
                 "data": {
                     "uin": str(bot.self_id),
-                    "name": _FORWARD_NODE_NAME,
+                    "name": _forward_node_name(),
                     "content": [content],
                 },
             }
