@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import sys
 from pathlib import Path
 
@@ -67,12 +68,18 @@ async def main() -> int:
     url = server.RELAY.url_for(files[0], "127.0.0.1", port)
     print(f"   {url}")
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(url)
-    expected = files[0].stat().st_size
-    ok = response.status_code == 200 and len(response.content) == expected
-    print(f"   HTTP {response.status_code}, {len(response.content)} bytes")
-    print("== 结果:", "PASS" if ok else "FAIL", "==")
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url)
+        expected = files[0].stat().st_size
+        ok = response.status_code == 200 and len(response.content) == expected
+        print(f"   HTTP {response.status_code}, {len(response.content)} bytes")
+        print("== 结果:", "PASS" if ok else "FAIL", "==")
+    finally:
+        # 这个脚本里没有插件的清扫任务，下载的媒体必须自己删，
+        # 否则每跑一次就往 /tmp（tmpfs，吃内存）里留一份
+        shutil.rmtree(task_dir, ignore_errors=True)
+        print(f"   已清理临时目录 {task_dir}")
     return 0 if ok else 1
 
 
