@@ -99,7 +99,7 @@ TYPE_LABELS: dict[str, str] = {
 WIDTH = 1080
 INSET = 48
 TITLE_SIZE = 58
-META_SIZE = 29
+META_SIZE = 27
 KICKER_SIZE = 27
 LOGO_HEIGHT = 54
 MIN_RATIO = 0.62
@@ -760,7 +760,7 @@ def render(
     pic = big.crop((left, top, left + card_w, top + card_h))
 
     title_font = _font(TITLE_SIZE, 700)
-    meta_font = _font(META_SIZE, 500)
+    meta_font = _font(META_SIZE, 400)
     kicker_font = _font(KICKER_SIZE, 600)
     title_lines = fit_title(
         getattr(result, "title", "") or "(无标题)",
