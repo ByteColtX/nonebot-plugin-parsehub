@@ -120,6 +120,11 @@ async def test_unsupported_link_gives_feedback(
             {"message_id": 4, "emoji_id": plugin.REACT_START, "set": True},
             result=None,
         )
+        ctx.should_call_api(
+            "set_msg_emoji_like",
+            {"message_id": 4, "emoji_id": plugin.REACT_FAIL, "set": True},
+            result=None,
+        )
         ctx.should_call_send(
             event, Message("这个链接 ParseHub 不支持。"), result=None, bot=bot
         )

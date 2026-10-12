@@ -1071,3 +1071,59 @@ async def test_send_swallows_protocol_failure(plugin, monkeypatch):
     monkeypatch.setattr(bot, "send", refuse)
     # 不抛异常就算通过（修复前这里会抛 ActionFailed，日志里多一整段堆栈）
     await plugin._send(bot, make_group_event("test"), Message("hi"))
+
+
+def _emojis(bot: FakeBot) -> list[str]:
+    """取这次调用里点过的表情 ID。"""
+    return [
+        kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parse_failure_reacts_fail_without_text(
+    plugin, monkeypatch, core
+):
+    """解析失败（非「作品不可用」）：点失败表情就够，不刷屏。"""
+
+    class Boom(Exception):
+        pass
+
+    async def fake_parse(url, proxy="", cookie=""):
+        raise Boom("解析炸了")
+
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+
+    bot = FakeBot()
+    await plugin.handle_link(
+        bot, make_group_event("https://b23.tv/abcd"), "https://b23.tv/abcd"
+    )
+
+    assert plugin.REACT_FAIL in _emojis(bot), bot.calls
+    assert [api for api, _ in bot.calls if api == "send_msg"] == [], (
+        bot.sent_texts
+    )
+
+
+@pytest.mark.asyncio
+async def test_content_unavailable_gets_notice(plugin, monkeypatch, core):
+    """作品被删 / 下架：失败表情 + 一句人话（自动解析也要说）。"""
+    from parsehub.errors import ContentUnavailableError
+
+    async def fake_parse(url, proxy="", cookie=""):
+        raise ContentUnavailableError("作品不可用: 抖音 status=0")
+
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+
+    bot = FakeBot()
+    url = "https://v.douyin.com/kE-zqatAP7M/"
+    await plugin.handle_link(bot, make_group_event(url), url)
+
+    assert plugin.REACT_FAIL in _emojis(bot), bot.calls
+    assert any("不可用" in text for text in bot.sent_texts), bot.sent_texts

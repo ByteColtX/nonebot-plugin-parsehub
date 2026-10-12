@@ -304,6 +304,36 @@ def _excerpt(text: str, limit: int) -> str:
     return collapsed[:limit] + "…"
 
 
+def _is_content_unavailable(exc: BaseException) -> bool:
+    """判断异常是否表示「作品已不可用（被删 / 下架）」。
+
+    按类名和消息判断，避免为了 isinstance 去 import parsehub（import 代价高）。
+
+    Args:
+        exc: 捕获到的异常。
+
+    Returns:
+        作品不可用类错误返回 True。
+    """
+    return type(
+        exc
+    ).__name__ == "ContentUnavailableError" or "作品不可用" in str(exc)
+
+
+def _failure_notice(exc: BaseException) -> str:
+    """解析失败时发给用户的一句话。
+
+    Args:
+        exc: 捕获到的异常。
+
+    Returns:
+        提示文案。
+    """
+    if _is_content_unavailable(exc):
+        return "这个作品已经不可用了（可能被删了）。"
+    return f"解析失败：{_short_error(exc)}"
+
+
 def _is_unknown_platform(exc: Exception) -> bool:
     """判断异常是否表示「平台不支持」。
 
@@ -611,11 +641,21 @@ async def handle_link(
         manual: 是否为命令触发；为 True 时无论成败都会给用户反馈。
     """
     cfg = plugin_config
+    # 平台白名单：被关掉的平台连「收到」都不点，免得看起来像在解析。
+    platform = await core.CLIENT.platform_id(url) or ""
+    if platform and not _platform_allowed(platform, cfg):
+        logger.info(f"[parsehub] {platform} 不在解析白名单里，跳过")
+        if manual:
+            await _send(bot, event, Message(_platform_off_message(platform)))
+        return
+
     # 收到链接就先回应，不等解析结果，也不等并发信号量。
     await _react(bot, event, REACT_START)
 
     async with _concurrency_limit():
-        await _parse_and_send(bot, event, url, manual=manual, cfg=cfg)
+        await _parse_and_send(
+            bot, event, url, manual=manual, cfg=cfg, platform=platform
+        )
 
 
 async def _parse_and_send(
@@ -625,6 +665,7 @@ async def _parse_and_send(
     *,
     manual: bool,
     cfg: Config,
+    platform: str = "",
 ) -> None:
     """解析链接并发送文字与媒体（并发限制已由调用方持有）。
 
@@ -634,6 +675,7 @@ async def _parse_and_send(
         url: 待解析的链接。
         manual: 是否为命令触发。
         cfg: 当前插件配置。
+        platform: 调用方已经查好的平台 id；留空时自己查一次。
     """
     session = _session_key(event)
     window = max(0, cfg.parsehub_dedupe_seconds)
@@ -646,6 +688,9 @@ async def _parse_and_send(
             logger.info(f"[parsehub] {pre_key} 在本会话刚发过，跳过")
             return
         DEDUPE.mark(session, pre_key)
+
+    if not platform:
+        platform = await core.CLIENT.platform_id(url) or ""
 
     # 平台白名单（PARSEHUB_PLATFORMS）：留空 = 全部平台。必须挡在缓存前面，
     # 否则白名单之外的平台还能靠缓存把旧作品发出来。
@@ -666,6 +711,7 @@ async def _parse_and_send(
         return
 
     if not await core.CLIENT.is_supported(url):
+        await _react(bot, event, REACT_FAIL)
         if manual:
             await _send(bot, event, Message("这个链接 ParseHub 不支持。"))
         return
@@ -680,10 +726,14 @@ async def _parse_and_send(
             cfg.parsehub_timeout,
         )
     except TimeoutError:
+        await _react(bot, event, REACT_FAIL)
         if manual:
             await _send(bot, event, Message("解析超时，稍后再试。"))
         return
     except Exception as exc:  # noqa: BLE001 - parsehub 异常类型很多，统一兜底
+        # 解析失败一定要有终点：前面已经点过「收到」，这里补上失败表情，
+        # 否则发送方看到的是「收到」之后什么都没有。
+        await _react(bot, event, REACT_FAIL)
         if _is_unknown_platform(exc):
             if manual:
                 await _send(bot, event, Message("这个链接 ParseHub 不支持。"))
@@ -691,8 +741,10 @@ async def _parse_and_send(
         logger.warning(
             f"[parsehub] 解析失败 {url}: {type(exc).__name__}: {exc}"
         )
-        if manual:
-            await _send(bot, event, Message(f"解析失败：{exc}"))
+        # 作品被删/下架这类原因要说一句，不然群里只看到一个失败表情，
+        # 不知道是链接坏了还是作品没了。
+        if manual or _is_content_unavailable(exc):
+            await _send(bot, event, Message(_failure_notice(exc)))
         return
 
     display_name = (

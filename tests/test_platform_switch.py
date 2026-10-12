@@ -97,6 +97,8 @@ async def test_platform_outside_whitelist_is_skipped(
 
     assert calls == {"parse": 0, "download": 0}, calls
     assert [api for api, _ in bot.calls if api == "send_msg"] == []
+    # 连「收到」都不点：被关掉的平台不该看起来像在解析
+    assert [api for api, _ in bot.calls if api == "set_msg_emoji_like"] == []
 
 
 @pytest.mark.asyncio
