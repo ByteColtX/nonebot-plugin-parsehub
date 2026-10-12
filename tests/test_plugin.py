@@ -1081,6 +1081,28 @@ def _emojis(bot: FakeBot) -> list[str]:
 
 
 @pytest.mark.asyncio
+async def test_warmup_preloads_parsehub(plugin, monkeypatch):
+    """启动预热：后台调用 hub，且失败也不抛异常（不阻塞启动）。"""
+    called = {"hub": 0}
+
+    async def fake_hub():
+        called["hub"] += 1
+        return object()
+
+    monkeypatch.setattr(plugin.core.CLIENT, "hub", fake_hub)
+    await plugin._warm_parsehub()
+    await asyncio.sleep(0.05)  # 让 create_task 跑完
+    assert called["hub"] == 1
+
+    async def boom():
+        raise RuntimeError("预热炸了")
+
+    monkeypatch.setattr(plugin.core.CLIENT, "hub", boom)
+    await plugin._warm_parsehub()  # 不该抛出去
+    await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
 async def test_parse_failure_reacts_fail_without_text(
     plugin, monkeypatch, core
 ):
