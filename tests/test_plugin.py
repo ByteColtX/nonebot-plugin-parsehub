@@ -1053,3 +1053,21 @@ def test_cleanup_removes_old_dirs(plugin, tmp_media, server):
     os.utime(old, (time.time() - 7200, time.time() - 7200))
     assert server.RELAY.cleanup(60) == 1
     assert not old.exists()
+
+
+@pytest.mark.asyncio
+async def test_send_swallows_protocol_failure(plugin, monkeypatch):
+    """协议端拒绝发消息时只记警告，不能把异常抛给 matcher。"""
+    bot = FakeBot()
+
+    async def refuse(*args, **kwargs):
+        raise ActionFailed(
+            status="failed",
+            retcode=1200,
+            data=None,
+            message="发送消息失败 (code=120)",
+        )
+
+    monkeypatch.setattr(bot, "send", refuse)
+    # 不抛异常就算通过（修复前这里会抛 ActionFailed，日志里多一整段堆栈）
+    await plugin._send(bot, make_group_event("test"), Message("hi"))

@@ -329,12 +329,18 @@ async def _send(
 ) -> None:
     """发送一条消息。
 
+    协议端偶发超时或风控拒绝（``ActionFailed``）时只记警告：这条消息发不出去
+    也不该把异常抛给 matcher，否则日志里会出现一整段堆栈。
+
     Args:
         bot: 当前 Bot 实例。
         event: 触发本次发送的事件。
         message: 待发送的消息。
     """
-    await bot.send(event, message)
+    try:
+        await bot.send(event, message)
+    except Exception as exc:  # noqa: BLE001 - 协议端原因很多，统一兜底
+        logger.warning(f"[parsehub] 消息发送失败: {type(exc).__name__}: {exc}")
 
 
 async def _react(bot: Bot, event: MessageEvent, emoji_id: str) -> None:
