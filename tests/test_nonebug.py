@@ -63,6 +63,11 @@ async def test_auto_matcher_parses_group_link(
         ctx.should_call_send(
             event, Message("📦 哔哩哔哩\n标题\n正文"), result=None, bot=bot
         )
+        ctx.should_call_api(
+            "set_msg_emoji_like",
+            {"message_id": 1, "emoji_id": plugin.REACT_OK, "set": True},
+            result=None,
+        )
         ctx.should_finished()
 
 
@@ -99,6 +104,11 @@ async def test_command_matcher_in_private(app: App, plugin, core, monkeypatch):
         )
         ctx.should_call_send(
             event, Message("📦 哔哩哔哩\n标题\n正文"), result=None, bot=bot
+        )
+        ctx.should_call_api(
+            "set_msg_emoji_like",
+            {"message_id": 3, "emoji_id": plugin.REACT_OK, "set": True},
+            result=None,
         )
         ctx.should_finished()
 

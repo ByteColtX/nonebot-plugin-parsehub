@@ -683,6 +683,8 @@ async def test_download_failure_after_retries_reports_short_error(
     assert calls["download"] == plugin._DOWNLOAD_ATTEMPTS
     texts = [text for text in bot.sent_texts if text]
     assert texts == ["下载失败：HTTP错误: 403"], texts
+    # 下载失败也要给终点状态：先点「收到」，失败时补失败表情
+    assert plugin.REACT_FAIL in _emojis(bot), bot.calls
 
 
 @pytest.mark.asyncio
@@ -936,6 +938,8 @@ async def test_handle_link_skips_oversized_media(
 
     assert any("超过上限" in t for t in bot.sent_texts), bot.sent_texts
     assert "upload_group_file" not in [api for api, _ in bot.calls]
+    # 全被挡掉也要给终点状态：失败表情
+    assert plugin.REACT_FAIL in _emojis(bot), bot.calls
 
 
 @pytest.mark.asyncio
@@ -958,6 +962,7 @@ async def test_handle_link_text_only_result(
         "send_msg"
     ) == 1  # 只有文字，没有媒体
     assert "一篇长文" in bot.sent_texts[0]
+    assert plugin.REACT_OK in _emojis(bot), bot.calls  # 纯文字帖也算处理成功
 
 
 @pytest.mark.asyncio

@@ -563,6 +563,8 @@ async def _send_media_files(
         items.append(path)
 
     if not items:
+        # 全被体积上限挡掉了：卡片/文字已经发过，这里补个失败表情当终点
+        await _react(bot, event, REACT_FAIL)
         return
 
     if len(items) > 1 and await _send_forward(bot, event, items):
@@ -799,6 +801,7 @@ async def _parse_and_send(
         await _send_card_or_text(
             bot, event, result, display_name, [], None, cfg
         )
+        await _react(bot, event, REACT_OK)
         return
 
     media_list = (
@@ -817,6 +820,7 @@ async def _parse_and_send(
                     "超过上限，已跳过。"
                 ),
             )
+            await _react(bot, event, REACT_FAIL)
             return
 
     # 先出卡：thumb_url / 图片媒体通常够用，不必等下载。此时不发文字兜底，
@@ -1021,6 +1025,8 @@ async def _download_task(
             if attempt < _DOWNLOAD_ATTEMPTS:
                 await asyncio.sleep(_DOWNLOAD_RETRY_DELAY)
                 continue
+            # 下载失败也要有终点：文字说原因，表情给状态（前面已点过「收到」）
+            await _react(bot, event, REACT_FAIL)
             await _send(bot, event, Message(f"下载失败：{_short_error(exc)}"))
             return None
         return task_dir, await _collect_local_files(downloaded)
