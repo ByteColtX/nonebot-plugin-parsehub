@@ -1276,3 +1276,45 @@ async def test_card_and_download_run_in_parallel(
     sends = [str(kw["message"]) for api, kw in bot.calls if api == "send_msg"]
     assert any("card.jpg" in text for text in sends), sends
     assert any("pic.jpg" in text for text in sends), sends
+
+
+def _card_event(payload: str):
+    """造一条只含 json 卡片段的消息（QQ 小程序分享就是这个形态）。"""
+    from nonebot.adapters.onebot.v11 import MessageSegment
+
+    event = make_group_event("")
+    event.message = Message(
+        [MessageSegment(type="json", data={"data": payload})]
+    )
+    return event
+
+
+# QQ 小程序卡片：链接在 meta.detail_1.qqdocurl 里，且 JSON 把斜杠转义了
+BILI_CARD = (
+    '{"app":"com.tencent.miniapp_01","prompt":"[QQ小程序]【测试】视频",'
+    '"meta":{"detail_1":{"appid":"1109937557","title":"测试视频",'
+    '"qqdocurl":"https:\\/\\/b23.tv\\/abcd",'
+    '"url":"m.q.qq.com\\/a\\/s?appid=1109937557"}}}'
+)
+QQ_ONLY_CARD = '{"url":"https:\\/\\/m.q.qq.com\\/a\\/s?appid=1109937557"}'
+
+
+def test_link_sources_reads_miniprogram_card(plugin):
+    """json 卡片里的链接要能取出来（JSON 把斜杠转义了）。"""
+    event = _card_event(BILI_CARD)
+    assert plugin.core.extract_urls(plugin._link_sources(event)) == [
+        "https://b23.tv/abcd"
+    ]
+
+
+def test_link_sources_skips_unrelated_card(plugin):
+    """卡片里 QQ 自己的链接不该被当成解析目标。"""
+    event = _card_event(QQ_ONLY_CARD)
+    assert plugin.core.extract_urls(plugin._link_sources(event)) == []
+
+
+@pytest.mark.asyncio
+async def test_auto_rule_accepts_miniprogram_card(plugin):
+    """只有 json 卡片、没有文字的消息也要能触发自动解析。"""
+    assert await plugin._auto_rule(_card_event(BILI_CARD)) is True
+    assert await plugin._auto_rule(_card_event(QQ_ONLY_CARD)) is False

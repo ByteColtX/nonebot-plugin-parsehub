@@ -1261,6 +1261,31 @@ def _can_control(event: MessageEvent) -> bool:
     return _is_superuser(event) or _is_group_admin(event)
 
 
+# QQ 小程序 / 分享卡片把链接藏在 json / xml 段的 data 里，纯文本取不到。
+_LINK_SEGMENT_TYPES = ("json", "xml")
+
+
+def _link_sources(event: MessageEvent) -> str:
+    """拼出消息里所有可能含链接的内容。
+
+    除了纯文本，还要看 json / xml 段（QQ 小程序、分享卡片）：里面的链接在 JSON
+    里斜杠是被转义的，先还原成正常 URL 再交给 ``core.extract_urls``。
+
+    Args:
+        event: 收到的消息事件。
+
+    Returns:
+        用于提取链接的文本。
+    """
+    parts = [event.get_plaintext()]
+    for segment in event.get_message():
+        if segment.type not in _LINK_SEGMENT_TYPES:
+            continue
+        raw = str(segment.data.get("data") or "")
+        parts.append(raw.replace("\\/", "/").replace("\\u0026", "&"))
+    return "\n".join(parts)
+
+
 async def _auto_rule(event: MessageEvent) -> bool:
     """判断是否应该自动解析这条消息。
 
@@ -1278,7 +1303,7 @@ async def _auto_rule(event: MessageEvent) -> bool:
     text = event.get_plaintext()
     if text.lstrip().startswith(_COMMAND_PREFIXES):
         return False  # 命令触发交给命令匹配器
-    return bool(core.extract_urls(text))
+    return bool(core.extract_urls(_link_sources(event)))
 
 
 auto_matcher = on_message(rule=Rule(_auto_rule), priority=20, block=False)
@@ -1321,7 +1346,7 @@ async def _handle_parse_cmd(
             f"{_session_name(event)}的解析已关闭，"
             "只有超管或群管理员能手动解析。"
         )
-    text = args.extract_plain_text().strip() or event.get_plaintext()
+    text = args.extract_plain_text().strip() or _link_sources(event)
     urls = core.extract_urls(text)
     if not urls:
         await parse_cmd.finish("用法：解析 <链接或分享文案>")
@@ -1401,7 +1426,7 @@ async def _handle_auto(bot: Bot, event: MessageEvent) -> None:
         bot: 当前 Bot 实例。
         event: 触发消息事件。
     """
-    urls = core.extract_urls(event.get_plaintext())
+    urls = core.extract_urls(_link_sources(event))
     session = _session_key(event)
     window = max(0, plugin_config.parsehub_dedupe_seconds)
     for url in urls[:_MAX_LINKS_PER_MESSAGE]:
