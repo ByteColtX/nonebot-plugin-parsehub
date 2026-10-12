@@ -1154,3 +1154,77 @@ async def test_content_unavailable_gets_notice(plugin, monkeypatch, core):
 
     assert plugin.REACT_FAIL in _emojis(bot), bot.calls
     assert any("不可用" in text for text in bot.sent_texts), bot.sent_texts
+
+
+def _wire_download_paths(
+    plugin, monkeypatch, tmp_media, core, *, parsed_fails: bool = False
+) -> dict:
+    """装好解析 + 两条下载路径，返回调用计数器。"""
+    img = tmp_media / "pic.jpg"
+    img.write_bytes(b"x" * 1024)
+    calls = {"parsed": 0, "by_url": 0}
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(
+            media=FakeMediaRef("https://cdn.example.com/pic.jpg", "jpg")
+        )
+
+    async def fake_parsed(result, path, proxy=""):
+        calls["parsed"] += 1
+        if parsed_fails:
+            raise RuntimeError("下载错误: HTTP错误: 403")
+        return FakeDownloadResult([img])
+
+    async def fake_by_url(url, path, proxy="", cookie=""):
+        calls["by_url"] += 1
+        return FakeDownloadResult([img])
+
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+    monkeypatch.setattr(core.CLIENT, "download_parsed", fake_parsed)
+    monkeypatch.setattr(core.CLIENT, "download", fake_by_url)
+    monkeypatch.setattr(
+        core,
+        "probe_size",
+        lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
+    )
+    monkeypatch.setattr(plugin, "_DOWNLOAD_RETRY_DELAY", 0)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_first_download_uses_parsed_result(
+    plugin, monkeypatch, tmp_media, core
+):
+    """首次下载走已经解析好的结果，不让库再解析一遍。"""
+    calls = _wire_download_paths(plugin, monkeypatch, tmp_media, core)
+    bot = FakeBot()
+    url = "https://b23.tv/abcd"
+    await plugin.handle_link(bot, make_group_event(url), url)
+
+    assert calls == {"parsed": 1, "by_url": 0}, calls
+    assert any(
+        api == "send_msg" and kw["message"][0].type == "image"
+        for api, kw in bot.calls
+    ), bot.calls
+
+
+@pytest.mark.asyncio
+async def test_download_retry_reparses_with_url(
+    plugin, monkeypatch, tmp_media, core
+):
+    """重试必须重新解析拿新签名，所以回到 download(url)。"""
+    calls = _wire_download_paths(
+        plugin, monkeypatch, tmp_media, core, parsed_fails=True
+    )
+    bot = FakeBot()
+    url = "https://b23.tv/abcd"
+    await plugin.handle_link(bot, make_group_event(url), url)
+
+    assert calls == {"parsed": 1, "by_url": 1}, calls
+    assert any(
+        api == "send_msg" and kw["message"][0].type == "image"
+        for api, kw in bot.calls
+    ), bot.calls

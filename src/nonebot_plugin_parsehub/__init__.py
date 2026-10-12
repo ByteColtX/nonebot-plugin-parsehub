@@ -27,6 +27,7 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from nonebot import get_driver, logger, on_command, on_message
 from nonebot.adapters.onebot.v11 import (
@@ -833,7 +834,9 @@ async def _parse_and_send(
         bot, event, result, display_name, [], None, cfg, allow_text=False
     )
 
-    downloaded = await _download_task(bot, event, url, proxy, cookie, cfg)
+    downloaded = await _download_task(
+        bot, event, url, proxy, cookie, cfg, result
+    )
     if downloaded is None:
         return
     task_dir, files = downloaded
@@ -998,6 +1001,7 @@ async def _download_task(
     proxy: str,
     cookie: str,
     cfg: Config,
+    result: Any = None,
 ) -> tuple[Path, list[Path]] | None:
     """下载媒体到新的任务目录。
 
@@ -1008,6 +1012,7 @@ async def _download_task(
         proxy: 解析与下载代理。
         cookie: 登录态 cookie。
         cfg: 当前插件配置。
+        result: 已经解析好的结果；给了就用它直接下载，省掉库内部那次重复解析。
 
     Returns:
         ``(任务目录, 本地文件列表)``；下载失败时为 ``None``。
@@ -1018,10 +1023,18 @@ async def _download_task(
         task_dir = server.RELAY.new_task_dir()
         started = time.monotonic()
         try:
-            downloaded = await asyncio.wait_for(
-                core.CLIENT.download(url, str(task_dir), proxy, cookie),
-                cfg.parsehub_timeout,
-            )
+            # 首次用已经解析过的结果下载，省掉库内部那次重复解析；重试则重新解析
+            # ——媒体直链的签名每次都变，只有重解析才能拿到新签名。
+            if attempt == 1 and result is not None:
+                downloaded = await asyncio.wait_for(
+                    core.CLIENT.download_parsed(result, str(task_dir), proxy),
+                    cfg.parsehub_timeout,
+                )
+            else:
+                downloaded = await asyncio.wait_for(
+                    core.CLIENT.download(url, str(task_dir), proxy, cookie),
+                    cfg.parsehub_timeout,
+                )
         except Exception as exc:  # noqa: BLE001 - 下载失败原因很多，统一兜底
             logger.warning(
                 f"[parsehub] 下载失败（第 {attempt}/{_DOWNLOAD_ATTEMPTS} 次）"

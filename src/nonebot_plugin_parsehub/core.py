@@ -469,6 +469,38 @@ class ParseHubClient:
             parse_cookie=cookie or None,
         )
 
+    async def download_parsed(
+        self,
+        result: Any,
+        path: str,
+        proxy: str = "",
+    ) -> Any:
+        """用已经解析好的结果下载媒体，不再解析一遍。
+
+        ParseHub 的 ``download(url)`` 内部会重新解析一次（库源码：
+        ``result = await self.parse(url, ...)`` 再 ``result.download(...)``）；
+        手里已经有解析结果时走这里，省掉那次重复解析。
+
+        注意：媒体直链的签名每次都变（实测同一链接解析两次，路径相同、签名不同），
+        所以**重试**必须回到 ``download(url)`` 重新解析拿新签名。
+
+        Args:
+            result: ``parse()`` 返回的解析结果。
+            path: 下载目录。
+            proxy: 下载代理。
+
+        Returns:
+            ParseHub 的下载结果对象，``media`` 里是本地文件。
+
+        Raises:
+            Exception: 下载失败时由 ParseHub 抛出的异常。
+        """
+        return await asyncio.to_thread(
+            result.download_sync,
+            path,
+            proxy=proxy or None,
+        )
+
 
 def _import_parsehub() -> Any:
     """在线程里导入 parsehub 并构造实例。

@@ -108,3 +108,18 @@ def _offline_card(card, monkeypatch):
     """
     card.set_font(TEST_FONT)
     monkeypatch.setattr(card, "fetch_cover", lambda *a, **kw: None)
+
+
+@pytest.fixture(autouse=True)
+def _parsed_download_delegates(core, monkeypatch):
+    """把「用已解析结果下载」委托给用例里 patch 的 ``CLIENT.download``。
+
+    真实实现走 ``result.download_sync(...)``（省掉库内部那次重复解析），但测试用的
+    ``FakeParseResult`` 没有这个方法；委托之后，原有那些只 patch ``CLIENT.download``
+    的用例仍然覆盖首次下载这条路。专门验证两条路径的用例自己再 patch 它。
+    """
+
+    async def delegate(result, path, proxy="", cookie=""):
+        return await core.CLIENT.download("<parsed>", path, proxy, cookie)
+
+    monkeypatch.setattr(core.CLIENT, "download_parsed", delegate)
