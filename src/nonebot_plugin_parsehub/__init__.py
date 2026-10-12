@@ -828,14 +828,13 @@ async def _parse_and_send(
             await _react(bot, event, REACT_FAIL)
             return
 
-    # 先出卡：thumb_url / 图片媒体通常够用，不必等下载。此时不发文字兜底，
-    # 免得下载抽帧那一步白做
-    info = await _send_card_or_text(
-        bot, event, result, display_name, [], None, cfg, allow_text=False
-    )
-
-    downloaded = await _download_task(
-        bot, event, url, proxy, cookie, cfg, result
+    # 卡片和下载并行：两者互不依赖（封面取不到时下载完再补一次），视频下载本来就
+    # 慢，让卡片渲染 + 上传的时间藏进下载里。两个协程内部都自己兜底，不抛异常。
+    info, downloaded = await asyncio.gather(
+        _send_card_or_text(
+            bot, event, result, display_name, [], None, cfg, allow_text=False
+        ),
+        _download_task(bot, event, url, proxy, cookie, cfg, result),
     )
     if downloaded is None:
         return

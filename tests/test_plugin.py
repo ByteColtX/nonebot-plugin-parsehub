@@ -1228,3 +1228,51 @@ async def test_download_retry_reparses_with_url(
         api == "send_msg" and kw["message"][0].type == "image"
         for api, kw in bot.calls
     ), bot.calls
+
+
+@pytest.mark.asyncio
+async def test_card_and_download_run_in_parallel(
+    plugin, monkeypatch, tmp_media, core
+):
+    """卡片和下载并行：两边互相等对方开始，串行的话必然超时。"""
+    card_started = asyncio.Event()
+    download_started = asyncio.Event()
+    img = tmp_media / "pic.jpg"
+    img.write_bytes(b"x" * 1024)
+    card_path = tmp_media / "card.jpg"
+    card_path.write_bytes(b"c" * 512)
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(
+            media=FakeMediaRef("https://cdn.example.com/pic.jpg", "jpg")
+        )
+
+    async def fake_render(result, files, task_dir, cfg):
+        card_started.set()
+        await asyncio.wait_for(download_started.wait(), 1)
+        return card_path
+
+    async def fake_parsed(result, path, proxy=""):
+        download_started.set()
+        await asyncio.wait_for(card_started.wait(), 1)
+        return FakeDownloadResult([img])
+
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+    monkeypatch.setattr(core.CLIENT, "download_parsed", fake_parsed)
+    monkeypatch.setattr(plugin, "_render_card", fake_render)
+    monkeypatch.setattr(
+        core,
+        "probe_size",
+        lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
+    )
+
+    bot = FakeBot()
+    url = "https://b23.tv/abcd"
+    await plugin.handle_link(bot, make_group_event(url), url)
+
+    sends = [str(kw["message"]) for api, kw in bot.calls if api == "send_msg"]
+    assert any("card.jpg" in text for text in sends), sends
+    assert any("pic.jpg" in text for text in sends), sends
