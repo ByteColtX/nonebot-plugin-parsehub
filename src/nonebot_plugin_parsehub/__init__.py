@@ -832,7 +832,15 @@ async def _parse_and_send(
     # 慢，让卡片渲染 + 上传的时间藏进下载里。两个协程内部都自己兜底，不抛异常。
     info, downloaded = await asyncio.gather(
         _send_card_or_text(
-            bot, event, result, display_name, [], None, cfg, allow_text=False
+            bot,
+            event,
+            result,
+            display_name,
+            [],
+            None,
+            cfg,
+            proxy,
+            allow_text=False,
         ),
         _download_task(bot, event, url, proxy, cookie, cfg, result),
     )
@@ -843,7 +851,7 @@ async def _parse_and_send(
     # 上面没出成卡（封面得从视频里抽帧）就带上下载好的文件再试一次
     if not info.sent:
         info = await _send_card_or_text(
-            bot, event, result, display_name, files, task_dir, cfg
+            bot, event, result, display_name, files, task_dir, cfg, proxy
         )
     if files:
         await _send_media_files(bot, event, files)
@@ -1059,6 +1067,7 @@ async def _render_card(
     files: list[Path],
     task_dir: Path | None,
     cfg: Config,
+    proxy: str = "",
 ) -> Path | None:
     """渲染卡片图（阻塞活走线程池）。
 
@@ -1067,6 +1076,7 @@ async def _render_card(
         files: 已下载的本地媒体，抽帧兜底要用。
         task_dir: 任务目录；为 ``None`` 时另建一个。
         cfg: 当前插件配置。
+        proxy: 取封面用的代理（海外平台的封面 CDN 直连会超时）。
 
     Returns:
         卡片图片路径；不可用时为 ``None``（调用方退回文字）。
@@ -1075,7 +1085,7 @@ async def _render_card(
         font = await asyncio.to_thread(card.ensure_font, server.cache_root())
         if font is None:
             return None
-        cover = await asyncio.to_thread(card.fetch_cover, result, files)
+        cover = await asyncio.to_thread(card.fetch_cover, result, files, proxy)
         if cover is None:
             logger.info("[parsehub] 没有可用封面，卡片跳过")
             return None
@@ -1096,6 +1106,7 @@ async def _send_card_or_text(
     files: list[Path],
     task_dir: Path | None,
     cfg: Config,
+    proxy: str = "",
     *,
     allow_text: bool = True,
 ) -> _SentInfo:
@@ -1109,6 +1120,7 @@ async def _send_card_or_text(
         files: 已下载的本地媒体。
         task_dir: 任务目录。
         cfg: 当前插件配置。
+        proxy: 取封面用的代理。
         allow_text: 出不了卡时是否立刻退回文字。下载前那次调用要传 ``False``，
             否则文字先发了，等下载完再抽帧出卡就成了重复消息。
 
@@ -1116,7 +1128,7 @@ async def _send_card_or_text(
         发出去了什么（卡片路径 / 文字），用来写媒体缓存。
     """
     if cfg.parsehub_card:
-        out_path = await _render_card(result, files, task_dir, cfg)
+        out_path = await _render_card(result, files, task_dir, cfg, proxy)
         if out_path is not None:
             url = server.RELAY.url_for(out_path, _ENDPOINT.host, _ENDPOINT.port)
             try:

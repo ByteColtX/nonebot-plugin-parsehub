@@ -73,7 +73,9 @@ def _wire(
         lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
     )
     # 有封面 → 走真卡片分支（渲染换成假的，测试不依赖 Pillow 排版）
-    monkeypatch.setattr(card, "fetch_cover", lambda result, files: b"cover")
+    monkeypatch.setattr(
+        card, "fetch_cover", lambda result, files, proxy="": b"cover"
+    )
     monkeypatch.setattr(card, "render", fake_render)
     return calls
 

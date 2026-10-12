@@ -78,7 +78,9 @@ def _wire(
         "probe_size",
         lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
     )
-    monkeypatch.setattr(card, "fetch_cover", lambda result, files: b"cover")
+    monkeypatch.setattr(
+        card, "fetch_cover", lambda result, files, proxy="": b"cover"
+    )
     monkeypatch.setattr(card, "render", fake_render)
     return calls
 

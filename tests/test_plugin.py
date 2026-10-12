@@ -387,7 +387,9 @@ async def test_handle_link_sends_card_before_media(
         "probe_size",
         lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
     )
-    monkeypatch.setattr(card, "fetch_cover", lambda result, files: b"cover")
+    monkeypatch.setattr(
+        card, "fetch_cover", lambda result, files, proxy="": b"cover"
+    )
     monkeypatch.setattr(card, "render", fake_render)
 
     bot = FakeBot()
@@ -1247,7 +1249,7 @@ async def test_card_and_download_run_in_parallel(
             media=FakeMediaRef("https://cdn.example.com/pic.jpg", "jpg")
         )
 
-    async def fake_render(result, files, task_dir, cfg):
+    async def fake_render(result, files, task_dir, cfg, proxy=""):
         card_started.set()
         await asyncio.wait_for(download_started.wait(), 1)
         return card_path
@@ -1311,6 +1313,50 @@ def test_link_sources_skips_unrelated_card(plugin):
     """卡片里 QQ 自己的链接不该被当成解析目标。"""
     event = _card_event(QQ_ONLY_CARD)
     assert plugin.core.extract_urls(plugin._link_sources(event)) == []
+
+
+@pytest.mark.asyncio
+async def test_cover_fetch_uses_platform_proxy(
+    plugin, monkeypatch, tmp_media, core, card
+):
+    """海外平台的封面也要走代理：直连会超时，卡片就被跳过了。"""
+    seen = {}
+
+    def fake_fetch_cover(result, files, proxy=""):
+        seen["proxy"] = proxy
+        return None
+
+    img = tmp_media / "pic.jpg"
+    img.write_bytes(b"x" * 1024)
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(
+            media=FakeMediaRef("https://cdn.example.com/pic.jpg", "jpg")
+        )
+
+    async def fake_download(result, path, proxy=""):
+        return FakeDownloadResult([img])
+
+    monkeypatch.setattr(
+        core, "proxy_for", lambda platform: "http://proxy.test:1"
+    )
+    monkeypatch.setattr(card, "fetch_cover", fake_fetch_cover)
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+    monkeypatch.setattr(core.CLIENT, "download_parsed", fake_download)
+    monkeypatch.setattr(
+        core,
+        "probe_size",
+        lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
+    )
+
+    bot = FakeBot()
+    url = "https://b23.tv/abcd"
+    await plugin.handle_link(bot, make_group_event(url), url)
+
+    assert seen.get("proxy") == "http://proxy.test:1", seen
 
 
 @pytest.mark.asyncio

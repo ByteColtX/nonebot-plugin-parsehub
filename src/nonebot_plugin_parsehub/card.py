@@ -497,7 +497,11 @@ def _frame_from_video(path: Path) -> bytes | None:
     return buffer.getvalue()
 
 
-def fetch_cover(result: Any, local_files: list[Path]) -> bytes | None:  # noqa: ANN401
+def fetch_cover(  # noqa: ANN401
+    result: Any,
+    local_files: list[Path],
+    proxy: str = "",
+) -> bytes | None:
     """取封面图，三级兜底。
 
     顺序：``thumb_url`` → 本身就是图片的媒体 → 本地视频抽首帧。
@@ -505,6 +509,7 @@ def fetch_cover(result: Any, local_files: list[Path]) -> bytes | None:  # noqa: 
     Args:
         result: ParseHub 解析结果。
         local_files: 已下载到本地的媒体文件。
+        proxy: 取封面用的代理；海外平台（如 TikTok）的封面 CDN 直连会超时。
 
     Returns:
         JPEG/PNG 字节；都拿不到时为 ``None``。
@@ -521,7 +526,10 @@ def fetch_cover(result: Any, local_files: list[Path]) -> bytes | None:  # noqa: 
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         with httpx.Client(
-            timeout=30, follow_redirects=True, headers=headers
+            timeout=30,
+            follow_redirects=True,
+            headers=headers,
+            proxy=proxy or None,
         ) as client:
             for item in items:
                 url = getattr(item, "thumb_url", None)
