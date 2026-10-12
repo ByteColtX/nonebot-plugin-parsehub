@@ -29,9 +29,10 @@ logger = logging.getLogger("nonebot_plugin_parsehub.card")
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets" / "logos"
 
-# duration 单位上游各平台不统一：抖音 / TikTok / 小红书给的是毫秒，其它是秒。
-# 新平台若时长明显偏大（8 秒视频显示 2 小时），下载媒体用 cv2 量真实时长核对。
-_MS_PLATFORMS = frozenset({"douyin", "tiktok", "xhs"})
+# duration 单位上游各平台不统一：抖音 / 小红书给的是毫秒，其它是秒。
+# 新平台要实测：下载媒体用 cv2 量真实时长核对（TikTok 就是这样确认是秒的——
+# 报告 12，cv2 量出 30fps × 366 帧 = 12.20s，早先当毫秒会显示成 00:00）。
+_MS_PLATFORMS = frozenset({"douyin", "xhs"})
 
 # 中文字体候选下载地址（按顺序尝试）。
 FONT_URLS: tuple[str, ...] = (
@@ -368,7 +369,7 @@ def platform_uses_milliseconds(result: Any) -> bool:  # noqa: ANN401
         result: ParseHub 解析结果。
 
     Returns:
-        抖音 / TikTok / 小红书返回 True。
+        抖音 / 小红书返回 True。
     """
     platform_id = str(getattr(getattr(result, "platform", None), "id", ""))
     return platform_id.lower() in _MS_PLATFORMS
@@ -377,7 +378,7 @@ def platform_uses_milliseconds(result: Any) -> bool:  # noqa: ANN401
 def video_seconds(result: Any) -> int:  # noqa: ANN401
     """取结果里最长媒体的时长（秒）。
 
-    上游单位不统一：毫秒（抖音 / TikTok / 小红书）要除 1000；另外把明显过大的
+    上游单位不统一：毫秒（抖音 / 小红书）要除 1000；另外把明显过大的
     值（> 3 小时）也当毫秒处理，与 :func:`format_duration` 的显示规则一致。
     拿不到时长时返回 0，调用方据此跳过时长判断。
 

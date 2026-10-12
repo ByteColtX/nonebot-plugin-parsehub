@@ -87,6 +87,30 @@ def test_meta_line_video(card) -> None:
     assert card.meta_line(result, 1, False) == "视频 · 00:33"
 
 
+def test_tiktok_duration_is_seconds(card) -> None:
+    """TikTok 的 duration 是秒（cv2 实测 30fps×366 帧=12.20s），不能按毫秒除。"""
+    tiktok = FakeResult(platform_id="tiktok", media=FakeRef(duration=12))
+    assert card.platform_uses_milliseconds(tiktok) is False
+    assert card.video_seconds(tiktok) == 12
+    assert card.meta_line(tiktok, 1, False) == "视频 · 00:12"
+
+    # 抖音 / 小红书仍然是毫秒
+    assert card.platform_uses_milliseconds(FakeResult(platform_id="douyin"))
+    assert card.platform_uses_milliseconds(FakeResult(platform_id="xhs"))
+    assert (
+        card.video_seconds(
+            FakeResult(platform_id="douyin", media=FakeRef(duration=12000))
+        )
+        == 12
+    )
+    assert (
+        card.video_seconds(
+            FakeResult(platform_id="xhs", media=FakeRef(duration=7967))
+        )
+        == 7
+    )
+
+
 def test_meta_line_image_with_count(card) -> None:
     """图文帖：类型 · 媒体数，没有时长。"""
     result = FakeResult(
