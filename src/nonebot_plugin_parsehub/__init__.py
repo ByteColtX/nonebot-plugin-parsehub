@@ -722,6 +722,7 @@ async def _parse_and_send(
     cookie = core.platform_cookie(platform, cfg.parsehub_cookie)
     logger.debug(f"[parsehub] {platform} 代理={proxy or '直连'}")
 
+    parse_started = time.monotonic()
     try:
         result = await asyncio.wait_for(
             core.CLIENT.parse(url, proxy, cookie),
@@ -753,7 +754,10 @@ async def _parse_and_send(
         result.platform.display_name if result.platform else "未知平台"
     )
     title = result.title or "(无标题)"
-    logger.info(f"[parsehub] {display_name} 解析成功: {url} -> {title}")
+    logger.info(
+        f"[parsehub] {display_name} 解析成功"
+        f"（耗时 {time.monotonic() - parse_started:.1f}s）: {url} -> {title}"
+    )
 
     # 解析结果里的 raw_url 是短链展开后的地址，用它再查一次去重：同一个作品换个
     # 写法（b23.tv/xxx 与 bilibili.com/video/BVxxx）在同一个会话里也只发一次。
@@ -1012,6 +1016,7 @@ async def _download_task(
     # 新地址，多数情况下就过了。
     for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
         task_dir = server.RELAY.new_task_dir()
+        started = time.monotonic()
         try:
             downloaded = await asyncio.wait_for(
                 core.CLIENT.download(url, str(task_dir), proxy, cookie),
@@ -1029,6 +1034,10 @@ async def _download_task(
             await _react(bot, event, REACT_FAIL)
             await _send(bot, event, Message(f"下载失败：{_short_error(exc)}"))
             return None
+        logger.info(
+            f"[parsehub] 下载完成，耗时 {time.monotonic() - started:.1f}s"
+            f"（第 {attempt}/{_DOWNLOAD_ATTEMPTS} 次尝试）"
+        )
         return task_dir, await _collect_local_files(downloaded)
     return None
 
