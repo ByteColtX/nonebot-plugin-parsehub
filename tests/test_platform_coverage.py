@@ -21,6 +21,7 @@ SHORT_LINK_HOSTS = (
     "fixupx.com",
     "chenzhongtech.com",
     "xiaochuankeji.cn",
+    "weixin.qq.com",
 )
 
 

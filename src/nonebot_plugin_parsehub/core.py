@@ -66,6 +66,7 @@ _ALLOWED_HOSTS: tuple[str, ...] = (
     "twitter.com",
     "weibo.cn",
     "weibo.com",
+    "weixin.qq.com",
     "x.com",
     "xiaochuankeji.cn",
     "xiaoheihe.cn",
