@@ -92,7 +92,7 @@ def test_font_runs_emoji_font_without_glyph_falls_back(card, monkeypatch) -> Non
     emoji = _StubFont("emoji")
     monkeypatch.setattr(card, "_GLYPH_CACHE", {})
     monkeypatch.setattr(card, "_fallback_fonts", lambda _size: (fb,))
-    monkeypatch.setattr(card, "_emoji_font", lambda _size: emoji)
+    monkeypatch.setattr(card, "_emoji_strike_font", lambda: emoji)
     # ⚈ 落在 emoji 码点区间里，但 Twemoji 没有这个字形
     monkeypatch.setattr(
         card,
@@ -108,7 +108,7 @@ def test_font_runs_emoji_font_with_glyph_wins(card, monkeypatch) -> None:
     emoji = _StubFont("emoji")
     monkeypatch.setattr(card, "_GLYPH_CACHE", {})
     monkeypatch.setattr(card, "_fallback_fonts", lambda _size: ())
-    monkeypatch.setattr(card, "_emoji_font", lambda _size: emoji)
+    monkeypatch.setattr(card, "_emoji_strike_font", lambda: emoji)
     monkeypatch.setattr(
         card, "_has_glyph", lambda font, text: font.name == "emoji"
     )

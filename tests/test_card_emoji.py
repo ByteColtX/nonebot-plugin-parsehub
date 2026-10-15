@@ -44,7 +44,7 @@ def test_draw_text_without_emoji_font(card) -> None:
     """没有 emoji 字体时退化成普通绘制，不抛异常。"""
     card._EMOJI_FONT = None
     card._emoji_font_file.cache_clear()
-    card._emoji_font.cache_clear()
+    card._emoji_strike_font.cache_clear()
     card._emoji_tile.cache_clear()
     canvas = Image.new("RGB", (400, 80), (20, 20, 20))
     draw = ImageDraw.Draw(canvas)
@@ -61,18 +61,40 @@ def test_draw_text_without_emoji_font(card) -> None:
 @pytest.mark.skipif(
     not _EMOJI_FONT_HINT.exists(), reason="本机没有 emoji 字体（onecloud 上会自动下载）"
 )
+def test_emoji_tile_scales_bitmap_strike(card) -> None:
+    """位图字体只有固定档位，贴图必须缩到「字号 × 比例」。"""
+    card._EMOJI_FONT = _EMOJI_FONT_HINT
+    card._emoji_font_file.cache_clear()
+    card._emoji_strike_font.cache_clear()
+    card._emoji_tile.cache_clear()
+    try:
+        tile = card._emoji_tile("🍧", 58)
+    finally:
+        card._EMOJI_FONT = None
+        card._emoji_font_file.cache_clear()
+        card._emoji_strike_font.cache_clear()
+        card._emoji_tile.cache_clear()
+    assert tile, "贴图不该为空"
+    image = tile[0]
+    assert image.height == round(58 * card.EMOJI_RATIO), "没缩到目标高度"
+    assert image.width > 0
+
+
+@pytest.mark.skipif(
+    not _EMOJI_FONT_HINT.exists(), reason="本机没有 emoji 字体（onecloud 上会自动下载）"
+)
 def test_emoji_tile_is_colored(card) -> None:
     """emoji 贴图必须真的带上颜色，而不是空白。"""
     card._EMOJI_FONT = _EMOJI_FONT_HINT
     card._emoji_font_file.cache_clear()
-    card._emoji_font.cache_clear()
+    card._emoji_strike_font.cache_clear()
     card._emoji_tile.cache_clear()
     try:
         tile = card._emoji_tile("🍧", 32)
     finally:
         card._EMOJI_FONT = None
         card._emoji_font_file.cache_clear()
-        card._emoji_font.cache_clear()
+        card._emoji_strike_font.cache_clear()
         card._emoji_tile.cache_clear()
     assert tile, "贴图不该为空"
     image = tile[0]

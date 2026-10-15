@@ -295,24 +295,42 @@ def _font(size: int, weight: int = 400) -> Any:  # noqa: ANN401 - PIL FreeTypeFo
     return font
 
 
-# 彩色 emoji 字体。Twemoji Mozilla 是 COLR 彩色字体：1.5MB、可任意字号。
-# 没用 Noto Color Emoji 是因为它是 11MB 的 CBDT 位图字体，只有 109px 一档，
-# 想画 58px 的标题得先按 109px 画再缩，armv7 上还要给每个 emoji 做缩放缓存。
-TWEMOJI_TAG = "v0.7.0"
-TWEMOJI_SHA256 = (
-    "6d90152ee0d29e82fe2a87793af5aa4b7ad13e6538360889e141e81ed299ee8e"
+# 彩色 emoji 字体：OpenMoji Color（CBDT 位图，6.8MB，OFL）。
+# 没用 Twemoji Mozilla：那是 COLR 彩色字体，FreeType 按基字形的 bbox 去裁彩色
+# 图层，超出部分被切掉（Pillow issue #9146），实测 emoji 下半截连嘴巴一起不见。
+# CBDT 是位图字形，没有这个问题；代价是只有一档位图，别的字号得先画再缩。
+OPENMOJI_COMMIT = "aeb8bb3a59e2de39c754ac79180c8131c906acea"
+OPENMOJI_SHA256 = (
+    "c1bb01e2802eed4e7aab21f76af7e508b2da3e7c6a6acd222f16ad2cb9614788"
 )
+OPENMOJI_PATH = "font/OpenMoji-color-cbdt/OpenMoji-color-cbdt.ttf"
 EMOJI_FONT_SOURCES: tuple[FontSource, ...] = (
     FontSource(
-        "https://github.com/mozilla/twemoji-colr/releases/download/"
-        f"{TWEMOJI_TAG}/Twemoji.Mozilla.ttf",
-        TWEMOJI_SHA256,
+        "https://raw.githubusercontent.com/hfg-gmuend/openmoji/"
+        f"{OPENMOJI_COMMIT}/{OPENMOJI_PATH}",
+        OPENMOJI_SHA256,
+    ),
+    FontSource(
+        "https://github.com/hfg-gmuend/openmoji/raw/"
+        f"{OPENMOJI_COMMIT}/{OPENMOJI_PATH}",
+        OPENMOJI_SHA256,
+    ),
+    FontSource(
+        "https://cdn.jsdelivr.net/gh/hfg-gmuend/openmoji@"
+        f"{OPENMOJI_COMMIT}/{OPENMOJI_PATH}",
+        OPENMOJI_SHA256,
     ),
 )
 EMOJI_FONT_URLS: tuple[str, ...] = tuple(
     source.url for source in EMOJI_FONT_SOURCES
 )
-EMOJI_FONT_NAME = "Twemoji.Mozilla.ttf"
+EMOJI_FONT_NAME = "OpenMoji-color-cbdt.ttf"
+# CBDT 位图档位：这个字体只认 99px，画别的字号必须先按它画再缩
+EMOJI_STRIKE = 99
+# emoji 贴图高度占字号多少（中文墨迹大约 0.9 个字号高）
+EMOJI_RATIO = 0.92
+# emoji 底边落在基线下多少（占字号），跟文字重心对齐
+EMOJI_DROP = 0.06
 
 # 算作 emoji 的码点区间（含 ZWJ、变体符、区域指示符，组合序列不会被切开）。
 _EMOJI_RANGES: tuple[tuple[int, int], ...] = (
@@ -352,25 +370,27 @@ def _emoji_font_file() -> Path | None:
     return None
 
 
-@lru_cache(maxsize=16)
-def _emoji_font(size: int) -> Any:  # noqa: ANN401 - PIL FreeTypeFont
-    """按字号取 emoji 字体对象。
+@lru_cache(maxsize=1)
+def _emoji_strike_font() -> Any:  # noqa: ANN401 - PIL FreeTypeFont
+    """取 emoji 字体对象（位图字体只有固定档位）。
 
-    Args:
-        size: 字号（像素）。
+    CBDT 位图字体按档位给字号，随便传一个数字会报 ``invalid pixel size``，所以先
+    试 :data:`EMOJI_STRIKE`，再退几个常见档位。
 
     Returns:
-        Pillow 字体对象；不可用时为 ``None``（调用方退回原样绘制）。
+        Pillow 字体对象；不可用时为 ``None``。
     """
     from PIL import ImageFont
 
     path = _emoji_font_file()
     if path is None:
         return None
-    try:
-        return ImageFont.truetype(str(path), size)
-    except Exception:  # noqa: BLE001 - 字体坏掉就当没有
-        return None
+    for size in (EMOJI_STRIKE, 109, 136, 128, 64, 32):
+        try:
+            return ImageFont.truetype(str(path), size)
+        except Exception:  # noqa: BLE001 - 这个档位没有就试下一个
+            continue
+    return None
 
 
 def ensure_emoji_font(cache_dir: Path, url: str = "") -> Path | None:
@@ -395,20 +415,20 @@ def ensure_emoji_font(cache_dir: Path, url: str = "") -> Path | None:
         if _matches_sources(local, EMOJI_FONT_SOURCES):
             _EMOJI_FONT = local
             _emoji_font_file.cache_clear()
-            _emoji_font.cache_clear()
+            _emoji_strike_font.cache_clear()
             return local
         local.unlink(missing_ok=True)  # 校验不过就重下
 
     if url and _fetch_font(FontSource(url, ""), local, 200_000):
         _EMOJI_FONT = local
         _emoji_font_file.cache_clear()
-        _emoji_font.cache_clear()
+        _emoji_strike_font.cache_clear()
         return local
     for source in EMOJI_FONT_SOURCES:
         if _fetch_font(source, local, 200_000):
             _EMOJI_FONT = local
             _emoji_font_file.cache_clear()
-            _emoji_font.cache_clear()
+            _emoji_strike_font.cache_clear()
             return local
 
     logger.warning("[parsehub] 没有可用的 emoji 字体，标题里的 emoji 会是方块")
@@ -576,7 +596,7 @@ def _font_runs(
         ``(片段, 字体对象或 None)`` 的列表，相邻同字体的片段已合并。
     """
     size = int(getattr(font, "size", 0) or emoji_size or 0)
-    emoji = _emoji_font(emoji_size) if emoji_size else None
+    emoji = _emoji_strike_font() if emoji_size else None
     fallbacks = _fallback_fonts(size) if size else ()
     runs: list[tuple[str, Any]] = []
     for chunk, is_emoji in _split_emoji(text):
@@ -611,9 +631,9 @@ def _advance(text: str, font: Any, emoji_size: int = 0) -> float:  # noqa: ANN40
     total = 0.0
     for chunk, slot in _font_runs(text, font, emoji_size):
         if slot is None:
-            emoji = _emoji_font(emoji_size)
-            if emoji is not None:
-                total += emoji.getlength(chunk)
+            tile = _emoji_tile(chunk, emoji_size)
+            if tile:
+                total += tile[0].width
             else:
                 total += font.getlength(chunk)
         else:
@@ -662,20 +682,21 @@ def _split_emoji(text: str) -> list[tuple[str, bool]]:
 
 
 @lru_cache(maxsize=256)
+@lru_cache(maxsize=256)
 def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int]:  # noqa: ANN401
-    """把一段 emoji 画在透明小图上。
+    """把一段 emoji 画在透明小图上，缩到目标大小。
 
     单独画一个 emoji 时 Pillow 不会上色（只有整串都是 emoji 时才有这个毛病），
     所以左边垫一个空格当"陪衬"，再把它画到裁剪区外面去。
 
     Args:
         chunk: emoji 片段。
-        size: 字号。
+        size: 正文字号。
 
     Returns:
         ``(透明小图, 基线在图中 y, 墨迹左偏移)``；字体不可用时为空元组。
     """
-    font = _emoji_font(size)
+    font = _emoji_strike_font()
     if font is None:
         return ()
     from PIL import Image, ImageDraw
@@ -692,7 +713,14 @@ def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int]:  # noqa: ANN401
     box = tile.getbbox()
     if box is None:
         return ()
-    return tile.crop(box), baseline - box[1], box[0]
+    art = tile.crop(box)
+    # 位图只有一档，缩到目标高度（宽度按比例）
+    target_h = max(1, int(round(size * EMOJI_RATIO)))
+    scale = target_h / art.height
+    art = art.resize(
+        (max(1, int(round(art.width * scale))), target_h), Image.LANCZOS
+    )
+    return art, target_h - int(round(size * EMOJI_DROP)), 0
 
 
 def draw_text(

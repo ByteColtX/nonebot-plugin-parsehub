@@ -214,6 +214,10 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 - 中文字体优先用 `PARSEHUB_CARD_FONT`，其次是插件缓存目录里的
   `HarmonyOS_Sans_SC_Regular.ttf`，再是系统字体，都没有才下载（首次下载约 8MB，
   之后走缓存；下载源钉在固定提交上并做 sha256 校验）
+- 彩色 emoji 用 OpenMoji Color（`OpenMoji-color-cbdt.ttf`，6.8MB，OFL）：它是 CBDT
+  位图字体，只有 99px 一档，所以贴图先按 99px 画再缩到目标大小。不用 Twemoji Mozilla
+  是因为那是 COLR 彩色字体，FreeType 按基字形 bbox 裁彩色图层（Pillow issue #9146），
+  emoji 下半截连嘴巴一起被切掉
 - 主字体缺的字（颜文字那类符号：`˶` `⚈` `Ɛ` `˵` `ʕ` `ɞ`）用回退字体补：
   `DejaVuSans.ttf`（0.7MB，补符号和 IPA）→ `NotoSans.ttf`（2MB，补修饰符字母），
   同样钉版本 + sha256；下不到就退回方块，不影响出卡
