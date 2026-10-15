@@ -1364,3 +1364,66 @@ async def test_auto_rule_accepts_miniprogram_card(plugin):
     """只有 json 卡片、没有文字的消息也要能触发自动解析。"""
     assert await plugin._auto_rule(_card_event(BILI_CARD)) is True
     assert await plugin._auto_rule(_card_event(QQ_ONLY_CARD)) is False
+
+
+@pytest.mark.asyncio
+async def test_handle_link_caps_media_items(
+    plugin, monkeypatch, tmp_media, core
+):
+    """媒体超过上限时只下载并发送前 20 个，并回一句提示。"""
+    total = plugin._MAX_MEDIA_ITEMS + 10
+    pics = []
+    for i in range(total):
+        p = tmp_media / f"p{i}.jpg"
+        p.write_bytes(b"x" * 512)
+        pics.append(p)
+
+    result = FakeParseResult(
+        media=[
+            FakeMediaRef(f"https://cdn.example.com/p{i}.jpg", "jpg")
+            for i in range(total)
+        ]
+    )
+    seen: dict[str, int] = {}
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return result
+
+    async def fake_download(res, path, proxy=""):
+        # 下载拿到的 result 必须已经截断过，否则 30 张图会全被拉下来
+        seen["media"] = len(res.media)
+        return FakeDownloadResult(pics[: len(res.media)])
+
+    monkeypatch.setattr(
+        core.CLIENT, "is_supported", lambda url: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+    monkeypatch.setattr(core.CLIENT, "download_parsed", fake_download)
+
+    bot = FakeBot()
+    url = "https://v.douyin.com/abcd/"
+    await plugin.handle_link(bot, make_group_event(url), url)
+
+    assert seen["media"] == plugin._MAX_MEDIA_ITEMS, seen
+    fwd = dict(bot.calls)["send_group_forward_msg"]
+    assert len(fwd["messages"]) == plugin._MAX_MEDIA_ITEMS
+    texts = [
+        str(kw.get("message", "")) for api, kw in bot.calls if api == "send_msg"
+    ]
+    assert any("只发前 20 项" in t for t in texts), texts
+
+
+@pytest.mark.asyncio
+async def test_send_media_files_caps_items(plugin, tmp_media):
+    """兜底：直接调用发送函数时也不会超过上限（缓存命中走的就是这条路）。"""
+    files = []
+    for i in range(plugin._MAX_MEDIA_ITEMS + 5):
+        p = tmp_media / f"m{i}.jpg"
+        p.write_bytes(b"x" * 512)
+        files.append(p)
+
+    bot = FakeBot()
+    await plugin._send_media_files(bot, make_group_event("x"), files)
+
+    fwd = dict(bot.calls)["send_group_forward_msg"]
+    assert len(fwd["messages"]) == plugin._MAX_MEDIA_ITEMS

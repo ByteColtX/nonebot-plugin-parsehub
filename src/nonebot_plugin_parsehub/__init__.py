@@ -11,7 +11,8 @@
 1. 收到链接立刻给原消息点一个表情回应（不等解析结果）；
 2. 解析出平台、标题、正文和媒体直链；
 3. 下载媒体到本机临时目录，再用内置 HTTP 服务给协议端一个 http 地址；
-4. 媒体多于一个时合并转发，否则逐条发送。
+4. 媒体多于一个时合并转发，否则逐条发送；一个作品最多发 20 个媒体，多出来的
+   不发（图集动辄上百张，全发会把协议端拖到超时）。
 
 解析与下载全部由 ``parsehub`` 完成，本插件只负责调度和发送。parsehub 是同步
 阻塞的（内部还用了 requests），因此所有调用都通过 ``asyncio.to_thread`` 执行，
@@ -69,6 +70,11 @@ REACT_START = "424"  # 收到链接，立即回应
 REACT_OK = "144"  # 视频发送成功
 REACT_FAIL = "5"  # 视频发送失败
 
+
+# 一次最多发多少个媒体。图集动辄上百张，而每张都要等协议端上传到 QQ（实测约
+# 2s/张且串行），下载也慢：全发既会顶穿解析总超时，也会把合并转发拖到超时后逐条
+# 刷屏。超出部分直接不发，只发前 _MAX_MEDIA_ITEMS 个。
+_MAX_MEDIA_ITEMS = 20
 
 # 合并转发里显示的节点名取自 NICKNAME 的第一项。
 # nonebot 把 NICKNAME 解析成 set，顺序会丢，所以这里读原始配置值，保证显示稳定
@@ -568,6 +574,9 @@ async def _send_media_files(
         await _react(bot, event, REACT_FAIL)
         return
 
+    # 兜底：缓存命中的路径不经过上面的截断，这里再保证一次
+    items = items[:_MAX_MEDIA_ITEMS]
+
     if len(items) > 1 and await _send_forward(bot, event, items):
         await _react(bot, event, REACT_OK)
         return
@@ -814,6 +823,11 @@ async def _parse_and_send(
         if isinstance(result.media, (list, tuple))
         else [result.media]
     )
+    # 在下载之前就截断：下载走的是 result.media，不截的话照样把上百张全拉下来
+    total_media = len(media_list)
+    if total_media > _MAX_MEDIA_ITEMS:
+        media_list = media_list[:_MAX_MEDIA_ITEMS]
+        result.media = media_list
     if len(media_list) == 1:
         oversized = await _oversized_size(media_list[0], proxy)
         if oversized:
@@ -854,6 +868,15 @@ async def _parse_and_send(
             bot, event, result, display_name, files, task_dir, cfg, proxy
         )
     if files:
+        if total_media > _MAX_MEDIA_ITEMS:
+            await _send(
+                bot,
+                event,
+                Message(
+                    f"（作品共 {total_media} 项，超过上限，只发前 "
+                    f"{_MAX_MEDIA_ITEMS} 项）"
+                ),
+            )
         await _send_media_files(bot, event, files)
         logger.info(
             f"[parsehub] 已发送 {len(files)} 个文件，"
