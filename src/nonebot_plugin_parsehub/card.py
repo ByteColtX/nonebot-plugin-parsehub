@@ -593,6 +593,10 @@ def _font_runs(
     fallbacks = _fallback_fonts(size) if size else ()
     runs: list[tuple[str, Any]] = []
     for chunk, is_emoji in _split_emoji(text):
+        if is_emoji:
+            # 变体选择符只是"按图形呈现"的提示，emoji 字体不需要它；有些
+            # FreeType 会把它当整字宽的可见字形，把 emoji 之间的间距撑得很大。
+            chunk = _strip_variation(chunk)
         if is_emoji and emoji is not None and _has_glyph(emoji, chunk):
             runs.append((chunk, None))
             continue
@@ -626,7 +630,7 @@ def _advance(text: str, font: Any, emoji_size: int = 0) -> float:  # noqa: ANN40
         if slot is None:
             tile = _emoji_tile(chunk, emoji_size)
             if tile:
-                total += tile[0].width
+                total += tile[3]
             else:
                 total += font.getlength(chunk)
         else:
@@ -647,6 +651,21 @@ def _can_draw_emoji(font: Any, text: str) -> bool:  # noqa: ANN401 - PIL FreeTyp
         有字形为 ``True``。
     """
     return _has_glyph(font, text)
+
+
+def _strip_variation(text: str) -> str:
+    """去掉变体选择符（U+FE0E / U+FE0F）。
+
+    它们只影响"按文字还是按图形呈现"，画 emoji 时不需要；留着反而会被某些
+    FreeType 当成整字宽的可见字形，把间距撑开。
+
+    Args:
+        text: 文本。
+
+    Returns:
+        去掉变体选择符的文本。
+    """
+    return text.replace("\ufe0f", "").replace("\ufe0e", "")
 
 
 def _split_emoji(text: str) -> list[tuple[str, bool]]:
@@ -675,44 +694,62 @@ def _split_emoji(text: str) -> list[tuple[str, bool]]:
 
 
 @lru_cache(maxsize=256)
-def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int]:  # noqa: ANN401
+def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int, float]:  # noqa: ANN401
     """把一段 emoji 画在透明小图上，缩到目标大小。
 
-    单独画一个 emoji 时 Pillow 不会上色（只有整串都是 emoji 时才有这个毛病），
-    所以左边垫一个空格当"陪衬"，再把它画到裁剪区外面去。
+    位图字体只有一档，所以先按档位画，再按比例缩到目标高度。推进宽度用字体自己的
+    advance（含左右边距），不然 emoji 会贴着旁边的字。
+
+    个别字体单独画一个 emoji 不上色，这时垫一个空格再画（空格画到裁剪区外）。
 
     Args:
         chunk: emoji 片段。
         size: 正文字号。
 
     Returns:
-        ``(透明小图, 基线在图中 y, 墨迹左偏移)``；字体不可用时为空元组。
+        ``(透明小图, 基线在图中 y, 墨迹左偏移, 推进宽度)``；不可用时为空元组。
     """
     font = _emoji_strike_font()
     if font is None:
         return ()
     from PIL import Image, ImageDraw
 
-    advance = max(1, int(round(font.getlength(chunk))))
     ascent, descent = font.getmetrics()
     baseline = ascent + 2
-    pad = font.getlength(" ") or advance
-    tile = Image.new("RGBA", (advance + 8, ascent + descent + 8), (0, 0, 0, 0))
-    ImageDraw.Draw(tile).text(
-        (-pad, baseline), " " + chunk, font=font, fill=(255, 255, 255),
+    width = max(1, int(round(font.getlength(chunk))))
+    canvas = Image.new(
+        "RGBA", (width + 8, ascent + descent + 8), (0, 0, 0, 0)
+    )
+    ImageDraw.Draw(canvas).text(
+        (0, baseline), chunk, font=font, fill=(255, 255, 255),
         anchor="ls", embedded_color=True,
     )
-    box = tile.getbbox()
+    box = canvas.getbbox()
     if box is None:
-        return ()
-    art = tile.crop(box)
-    # 位图只有一档，缩到目标高度（宽度按比例）
+        # 单独画不上色：垫一个空格（画到裁剪区外）再来一次
+        pad = font.getlength(" ") or width
+        canvas = Image.new(
+            "RGBA", (width + int(pad) + 8, ascent + descent + 8), (0, 0, 0, 0)
+        )
+        ImageDraw.Draw(canvas).text(
+            (-pad, baseline), " " + chunk, font=font, fill=(255, 255, 255),
+            anchor="ls", embedded_color=True,
+        )
+        box = canvas.getbbox()
+        if box is None:
+            return ()
+    art = canvas.crop(box)
     target_h = max(1, int(round(size * EMOJI_RATIO)))
     scale = target_h / art.height
     art = art.resize(
         (max(1, int(round(art.width * scale))), target_h), Image.LANCZOS
     )
-    return art, target_h - int(round(size * EMOJI_DROP)), 0
+    return (
+        art,
+        target_h - int(round(size * EMOJI_DROP)),
+        int(round(box[0] * scale)),
+        max(1.0, font.getlength(chunk) * scale),
+    )
 
 
 def draw_text(
@@ -742,16 +779,16 @@ def draw_text(
         if slot is None:
             tile = _emoji_tile(chunk, emoji_size)
             if tile:
-                image, baseline_in_tile, left = tile
+                image, baseline_in_tile, left, advance = tile
                 image_draw = getattr(draw, "_image", None)
-                if image_draw is None:  # pragma: no cover - ImageDraw 都有
+                if image_draw is None:  # pragma: no cover - ImageDraw 都有 _image
                     image_draw = draw.im
                 image_draw.paste(
                     image,
-                    (int(x - left), int(baseline - baseline_in_tile)),
+                    (int(x + left), int(baseline - baseline_in_tile)),
                     image,
                 )
-                x += _advance(chunk, font, emoji_size)
+                x += advance
                 continue
             slot = font  # 贴图失败就按普通文字画，至少不丢字
         draw.text((x, top), chunk, font=slot, fill=fill)
