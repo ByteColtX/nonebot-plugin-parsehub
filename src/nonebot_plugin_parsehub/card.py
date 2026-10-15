@@ -52,30 +52,33 @@ class FontSource:
     sha256: str
 
 
-# 中文字体（Noto Sans SC 可变字重）。钉在 google/fonts 的这次提交上，
-# 不跟 main 分支走：
-# 上游一改文件，缓存里那份和线上就不是同一个东西了。
-NOTO_SANS_SC_COMMIT = "a85815a42757630ce188fdad368c2dfc444d4773"
-NOTO_SANS_SC_SHA256 = (
-    "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da"
+# 中文字体（HarmonyOS Sans SC，静态单字重）。钉在镜像仓库的这次提交上，
+# 不跟分支走：上游一改文件，缓存里那份和线上就不是同一个东西了。
+# 华为官方只发 zip 包、没有稳定直链，所以用镜像仓库 + 提交 SHA + sha256 锁字节。
+HARMONY_COMMIT = "33172a5f6b9122f2310a6a26c64f7f64e38a8456"
+HARMONY_REGULAR_SHA256 = (
+    "297b088424be212207df2ce8b98e335468b782aa6b96832af0b8b773d711e2b1"
 )
-NOTO_SANS_SC_PATH = "ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+HARMONY_REGULAR_PATH = "HarmonyOS_Sans_SC/HarmonyOS_Sans_SC_Regular.ttf"
+
+# 缓存目录里的文件名。
+FONT_NAME = "HarmonyOS_Sans_SC_Regular.ttf"
 
 FONT_SOURCES: tuple[FontSource, ...] = (
     FontSource(
-        "https://raw.githubusercontent.com/google/fonts/"
-        f"{NOTO_SANS_SC_COMMIT}/{NOTO_SANS_SC_PATH}",
-        NOTO_SANS_SC_SHA256,
+        "https://raw.githubusercontent.com/ajacocks/harmonyos-sans-font/"
+        f"{HARMONY_COMMIT}/{HARMONY_REGULAR_PATH}",
+        HARMONY_REGULAR_SHA256,
     ),
     FontSource(
-        "https://github.com/google/fonts/raw/"
-        f"{NOTO_SANS_SC_COMMIT}/{NOTO_SANS_SC_PATH}",
-        NOTO_SANS_SC_SHA256,
+        "https://github.com/ajacocks/harmonyos-sans-font/raw/"
+        f"{HARMONY_COMMIT}/{HARMONY_REGULAR_PATH}",
+        HARMONY_REGULAR_SHA256,
     ),
     FontSource(
-        "https://cdn.jsdelivr.net/gh/google/fonts@"
-        f"{NOTO_SANS_SC_COMMIT}/{NOTO_SANS_SC_PATH}",
-        NOTO_SANS_SC_SHA256,
+        "https://cdn.jsdelivr.net/gh/ajacocks/harmonyos-sans-font@"
+        f"{HARMONY_COMMIT}/{HARMONY_REGULAR_PATH}",
+        HARMONY_REGULAR_SHA256,
     ),
 )
 FONT_URLS: tuple[str, ...] = tuple(source.url for source in FONT_SOURCES)
@@ -566,7 +569,7 @@ def ensure_font(cache_dir: Path, url: str = "") -> Path | None:
     if _CUSTOM_FONT is not None and _CUSTOM_FONT.exists():
         return _CUSTOM_FONT
 
-    local = cache_dir / "NotoSansSC.ttf"
+    local = cache_dir / FONT_NAME
     if local.exists() and local.stat().st_size > 1_000_000:
         if _matches_sources(local, FONT_SOURCES):
             _CUSTOM_FONT = local

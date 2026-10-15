@@ -96,7 +96,7 @@ def test_fetch_font_rejects_truncated_download(card, tmp_path, monkeypatch) -> N
 
 def test_ensure_font_drops_tampered_cache(card, tmp_path, monkeypatch) -> None:
     """缓存里的字体校验不过时删掉重下；下不到就宁可不给字体。"""
-    local = tmp_path / "NotoSansSC.ttf"
+    local = tmp_path / card.FONT_NAME
     local.write_bytes(b"tampered" + b"\x00" * 2_000_000)
     monkeypatch.setattr(card, "_font_file", lambda: None)
     monkeypatch.setattr(card, "_fetch_font", lambda *_a, **_k: False)
