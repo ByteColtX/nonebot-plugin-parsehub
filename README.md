@@ -214,6 +214,9 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 - 中文字体优先用 `PARSEHUB_CARD_FONT`，其次是插件缓存目录里的
   `HarmonyOS_Sans_SC_Regular.ttf`，再是系统字体，都没有才下载（首次下载约 8MB，
   之后走缓存；下载源钉在固定提交上并做 sha256 校验）
+- 主字体缺的字（颜文字那类符号：`˶` `⚈` `Ɛ` `˵` `ʕ` `ɞ`）用回退字体补：
+  `DejaVuSans.ttf`（0.7MB，补符号和 IPA）→ `NotoSans.ttf`（2MB，补修饰符字母），
+  同样钉版本 + sha256；下不到就退回方块，不影响出卡
 
 ## 🛠️ 开发
 

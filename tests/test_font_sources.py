@@ -35,7 +35,10 @@ def _patch_stream(card, monkeypatch, payload: bytes, status: int = 200) -> None:
 
 def test_sources_are_pinned_and_hashed(card) -> None:
     """每个下载源都得钉到具体版本、带 sha256，不能跟分支走。"""
-    for source in card.FONT_SOURCES + card.EMOJI_FONT_SOURCES:
+    sources = list(card.FONT_SOURCES) + list(card.EMOJI_FONT_SOURCES)
+    for _name, fallback in card.FALLBACK_FONTS:
+        sources += list(fallback)
+    for source in sources:
         assert len(source.sha256) == 64, source.url
         assert "@main/" not in source.url, f"还跟着分支走：{source.url}"
         assert "/main/" not in source.url, f"还跟着分支走：{source.url}"

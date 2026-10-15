@@ -415,10 +415,216 @@ def ensure_emoji_font(cache_dir: Path, url: str = "") -> Path | None:
     return None
 
 
+# 回退字体：主字体缺字时按顺序往下找（主字体 → 彩色 emoji → DejaVu →
+# Noto Sans）。
+# 颜文字那类字符（˶ ⚈ Ɛ ˵ ʕ ɞ ฅ）主字体里没有，不补就是豆腐框或空白。
+# DejaVu Sans 补符号和 IPA，Noto Sans 补修饰符字母。
+DEJAVU_TAG = "v3.9.2"
+DEJAVU_SHA256 = (
+    "3fdf69cabf06049ea70a00b5919340e2ce1e6d02b0cc3c4b44fb6801bd1e0d22"
+)
+DEJAVU_PATH = "lib/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf"
+FALLBACK_NOTO_COMMIT = "a85815a42757630ce188fdad368c2dfc444d4773"
+FALLBACK_NOTO_SHA256 = (
+    "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+)
+FALLBACK_NOTO_PATH = "ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf"
+
+# (缓存文件名, 下载源)，顺序就是查找顺序。
+FALLBACK_FONTS: tuple[tuple[str, tuple[FontSource, ...]], ...] = (
+    (
+        "DejaVuSans.ttf",
+        (
+            FontSource(
+                "https://raw.githubusercontent.com/matplotlib/matplotlib/"
+                f"{DEJAVU_TAG}/{DEJAVU_PATH}",
+                DEJAVU_SHA256,
+            ),
+            FontSource(
+                "https://github.com/matplotlib/matplotlib/raw/"
+                f"{DEJAVU_TAG}/{DEJAVU_PATH}",
+                DEJAVU_SHA256,
+            ),
+            FontSource(
+                "https://cdn.jsdelivr.net/gh/matplotlib/matplotlib@"
+                f"{DEJAVU_TAG}/{DEJAVU_PATH}",
+                DEJAVU_SHA256,
+            ),
+        ),
+    ),
+    (
+        "NotoSans.ttf",
+        (
+            FontSource(
+                "https://raw.githubusercontent.com/google/fonts/"
+                f"{FALLBACK_NOTO_COMMIT}/{FALLBACK_NOTO_PATH}",
+                FALLBACK_NOTO_SHA256,
+            ),
+            FontSource(
+                "https://github.com/google/fonts/raw/"
+                f"{FALLBACK_NOTO_COMMIT}/{FALLBACK_NOTO_PATH}",
+                FALLBACK_NOTO_SHA256,
+            ),
+            FontSource(
+                "https://cdn.jsdelivr.net/gh/google/fonts@"
+                f"{FALLBACK_NOTO_COMMIT}/{FALLBACK_NOTO_PATH}",
+                FALLBACK_NOTO_SHA256,
+            ),
+        ),
+    ),
+)
+
+_FALLBACK_FILES: list[Path] = []
+
+
+@lru_cache(maxsize=16)
+def _fallback_fonts(size: int) -> tuple[Any, ...]:
+    """按字号取回退字体对象，顺序即查找顺序。
+
+    Args:
+        size: 字号（像素）。
+
+    Returns:
+        可用的字体对象元组；一个都没有时为空元组。
+    """
+    from PIL import ImageFont
+
+    fonts: list[Any] = []
+    for path in _FALLBACK_FILES:
+        try:
+            fonts.append(ImageFont.truetype(str(path), size))
+        except Exception:  # noqa: BLE001 - 字体坏掉就跳过，不影响出卡
+            continue
+    return tuple(fonts)
+
+
+def ensure_fallback_fonts(cache_dir: Path) -> list[Path]:
+    """确保回退字体都在缓存里，缺的按 :data:`FALLBACK_FONTS` 下载并校验。
+
+    Args:
+        cache_dir: 插件缓存目录。
+
+    Returns:
+        可用的字体文件列表；某个下不到就当它不存在（缺字退回方块），不影响出卡。
+    """
+    global _FALLBACK_FILES  # noqa: PLW0603 - 单例式配置
+
+    # 已经装好了就直接返回，别每出一张卡就把两个字体重新哈希一遍
+    if _FALLBACK_FILES and all(path.exists() for path in _FALLBACK_FILES):
+        return list(_FALLBACK_FILES)
+
+    files: list[Path] = []
+    for name, sources in FALLBACK_FONTS:
+        local = cache_dir / name
+        if local.exists() and local.stat().st_size > 100_000:
+            if not _matches_sources(local, sources):
+                local.unlink(missing_ok=True)  # 校验不过就重下，不留着用
+        if not (local.exists() and local.stat().st_size > 100_000):
+            for source in sources:
+                if _fetch_font(source, local, 100_000):
+                    break
+        if local.exists() and local.stat().st_size > 100_000:
+            files.append(local)
+        else:
+            logger.warning(f"[parsehub] 回退字体 {name} 不可用，缺字会画成方块")
+    _FALLBACK_FILES = files
+    _fallback_fonts.cache_clear()
+    return files
+
+
+def _has_glyph(font: Any, text: str) -> bool:  # noqa: ANN401 - PIL FreeTypeFont
+    """查字体里有没有这段文字的字形。
+
+    用私用区字符当"必然缺字"的参照，跟 ``.notdef`` 的 mask 比"不相等"——不能比
+    "非空"：COLR 彩色字体里有字形反而拿到空 mask，而有的普通字体 ``.notdef``
+    本身就是空白。
+
+    Args:
+        font: 字体对象。
+        text: 待查片段。
+
+    Returns:
+        有字形为 ``True``。
+    """
+    key = (id(font), text)
+    if key not in _GLYPH_CACHE:
+        try:
+            missing = bytes(font.getmask("\ue123", mode="L"))
+            _GLYPH_CACHE[key] = bytes(font.getmask(text, mode="L")) != missing
+        except Exception:  # noqa: BLE001 - 取不到字形就当画不了
+            _GLYPH_CACHE[key] = False
+    return _GLYPH_CACHE[key]
+
+
+def _font_runs(
+    text: str,
+    font: Any,  # noqa: ANN401 - PIL FreeTypeFont
+    emoji_size: int = 0,
+) -> list[tuple[str, Any]]:
+    """把文本切成 (片段, 用哪个字体) 的序列。
+
+    字体为 ``None`` 表示这一段要用彩色 emoji 贴图。逐字符挑第一个有字形的字体：
+    主字体 → 彩色 emoji（emoji 码点）→ 回退字体；都没有就还回主字体
+    （会画成方块）。
+
+    Args:
+        text: 文本。
+        font: 主字体对象。
+        emoji_size: emoji 字号；0 表示不处理 emoji。
+
+    Returns:
+        ``(片段, 字体对象或 None)`` 的列表，相邻同字体的片段已合并。
+    """
+    size = int(getattr(font, "size", 0) or emoji_size or 0)
+    emoji = _emoji_font(emoji_size) if emoji_size else None
+    fallbacks = _fallback_fonts(size) if size else ()
+    runs: list[tuple[str, Any]] = []
+    for chunk, is_emoji in _split_emoji(text):
+        if is_emoji and emoji is not None and _has_glyph(emoji, chunk):
+            runs.append((chunk, None))
+            continue
+        for ch in chunk:
+            slot = font
+            if not ch.isspace() and not _has_glyph(font, ch):
+                for candidate in fallbacks:
+                    if _has_glyph(candidate, ch):
+                        slot = candidate
+                        break
+            if runs and runs[-1][1] is slot:
+                runs[-1] = (runs[-1][0] + ch, slot)
+            else:
+                runs.append((ch, slot))
+    return runs
+
+
+def _advance(text: str, font: Any, emoji_size: int = 0) -> float:  # noqa: ANN401
+    """算一段文字实际画出来有多宽（跟 :func:`draw_text` 的推进保持一致）。
+
+    Args:
+        text: 文本。
+        font: 主字体对象。
+        emoji_size: emoji 字号；0 表示不处理 emoji。
+
+    Returns:
+        宽度（像素）。
+    """
+    total = 0.0
+    for chunk, slot in _font_runs(text, font, emoji_size):
+        if slot is None:
+            emoji = _emoji_font(emoji_size)
+            if emoji is not None:
+                total += emoji.getlength(chunk)
+            else:
+                total += font.getlength(chunk)
+        else:
+            total += slot.getlength(chunk)
+    return total
+
+
 def _can_draw_emoji(font: Any, text: str) -> bool:  # noqa: ANN401 - PIL FreeTypeFont
     """查 emoji 字体里有没有这段文字的字形。
 
-    用私用区字符当"必然缺字"的参照，避免把缺字画成方块。
+    等价于 :func:`_has_glyph`，保留这个名字是因为 emoji 那条路径一直在用它。
 
     Args:
         font: emoji 字体对象。
@@ -427,16 +633,7 @@ def _can_draw_emoji(font: Any, text: str) -> bool:  # noqa: ANN401 - PIL FreeTyp
     Returns:
         有字形为 ``True``。
     """
-    key = (id(font), text)
-    if key not in _GLYPH_CACHE:
-        try:
-            # 注意：COLR 彩色字体里"有字形"反而拿到空 mask，缺字才拿到 .notdef
-            # 方块。所以只能跟 .notdef 的 mask 比"不相等"，不能比"非空"。
-            missing = bytes(font.getmask("\ue123", mode="L"))
-            _GLYPH_CACHE[key] = bytes(font.getmask(text, mode="L")) != missing
-        except Exception:  # noqa: BLE001 - 取不到字形就当画不了
-            _GLYPH_CACHE[key] = False
-    return _GLYPH_CACHE[key]
+    return _has_glyph(font, text)
 
 
 def _split_emoji(text: str) -> list[tuple[str, bool]]:
@@ -506,9 +703,10 @@ def draw_text(
     fill: tuple[int, int, int],
     emoji_size: int = 0,
 ) -> None:
-    """画一行文字，emoji 段用彩色字体贴上去。
+    """画一行文字：emoji 段用彩色字体贴上去，主字体缺的字用回退字体补。
 
-    没有 emoji 字体时退化成普通的 ``draw.text``（emoji 会显示成方块）。
+    字体链见 :func:`_font_runs`。没有 emoji 字体、也没有回退字体时退化成普通的
+    ``draw.text``（缺字会显示成方块）。
 
     Args:
         draw: ImageDraw 对象。
@@ -518,28 +716,26 @@ def draw_text(
         fill: 颜色。
         emoji_size: emoji 字号；0 表示不做 emoji 处理。
     """
-    if not emoji_size or _emoji_font(emoji_size) is None:
-        draw.text(xy, text, font=font, fill=fill)
-        return
-
     x, top = xy
     baseline = top + font.getmetrics()[0]
-    for chunk, is_emoji in _split_emoji(text):
-        tile = _emoji_tile(chunk, emoji_size) if is_emoji else ()
-        if tile:
-            image, baseline_in_tile, left = tile
-            image_draw = getattr(draw, "_image", None)
-            if image_draw is None:  # pragma: no cover - ImageDraw 都有 _image
-                image_draw = draw.im
-            image_draw.paste(
-                image,
-                (int(x - left), int(baseline - baseline_in_tile)),
-                image,
-            )
-            x += _emoji_font(emoji_size).getlength(chunk)
-        else:
-            draw.text((x, top), chunk, font=font, fill=fill)
-            x += font.getlength(chunk)
+    for chunk, slot in _font_runs(text, font, emoji_size):
+        if slot is None:
+            tile = _emoji_tile(chunk, emoji_size)
+            if tile:
+                image, baseline_in_tile, left = tile
+                image_draw = getattr(draw, "_image", None)
+                if image_draw is None:  # pragma: no cover - ImageDraw 都有
+                    image_draw = draw.im
+                image_draw.paste(
+                    image,
+                    (int(x - left), int(baseline - baseline_in_tile)),
+                    image,
+                )
+                x += _advance(chunk, font, emoji_size)
+                continue
+            slot = font  # 贴图失败就按普通文字画，至少不丢字
+        draw.text((x, top), chunk, font=slot, fill=fill)
+        x += slot.getlength(chunk)
 
 
 def set_font(path: Path) -> None:
@@ -616,6 +812,7 @@ def wrap(
     font: Any,  # noqa: ANN401 - PIL FreeTypeFont
     max_w: int,
     max_lines: int,
+    emoji_size: int = 0,
 ) -> list[str]:
     """按"词"折行，话题标签和网址不会被从中间劈开。
 
@@ -624,11 +821,15 @@ def wrap(
         font: 字体对象。
         max_w: 每行最大像素宽度。
         max_lines: 最多行数，超出时最后一行加省略号。
+        emoji_size: emoji / 回退字体用的字号；0 表示按主字体算宽度。
 
     Returns:
         折行后的文本列表。
     """
     import re
+
+    def width(part: str) -> float:
+        return _advance(part, font, emoji_size)
 
     lines: list[str] = []
     for para in text.split("\n"):
@@ -636,7 +837,7 @@ def wrap(
             continue
         cur = ""
         for token in re.findall(r"\S+\s*", para):
-            if font.getlength(cur + token) <= max_w:
+            if width(cur + token) <= max_w:
                 cur += token
                 continue
             if cur.strip():
@@ -644,10 +845,10 @@ def wrap(
                 cur = ""
                 if len(lines) == max_lines:
                     break
-            if font.getlength(token) > max_w:  # 单个词就超宽，只能按字符切
+            if width(token) > max_w:  # 单个词就超宽，只能按字符切
                 piece = ""
                 for char in token:
-                    if font.getlength(piece + char) <= max_w:
+                    if width(piece + char) <= max_w:
                         piece += char
                     else:
                         lines.append(piece)
@@ -675,6 +876,7 @@ def fit_title(
     font: Any,  # noqa: ANN401 - PIL FreeTypeFont
     max_w: int,
     max_lines: int,
+    emoji_size: int = 0,
 ) -> list[str]:
     """标题折行；末尾的话题标签放不下就整条丢掉，不从中间截断。
 
@@ -683,18 +885,19 @@ def fit_title(
         font: 字体对象。
         max_w: 每行最大像素宽度。
         max_lines: 最多行数。
+        emoji_size: emoji / 回退字体用的字号；0 表示按主字体算宽度。
 
     Returns:
         折行后的标题。
     """
-    lines = wrap(title, font, max_w, max_lines)
+    lines = wrap(title, font, max_w, max_lines, emoji_size)
     if len(_flat("".join(lines).rstrip("…"))) >= len(_flat(title)):
         return lines
     tokens = title.split(" ")
     while len(tokens) > 1 and tokens[-1].startswith("#"):
         tokens.pop()
         trial = " ".join(tokens)
-        trial_lines = wrap(trial, font, max_w, max_lines)
+        trial_lines = wrap(trial, font, max_w, max_lines, emoji_size)
         if len(_flat("".join(trial_lines).rstrip("…"))) >= len(_flat(trial)):
             return trial_lines
     return lines
@@ -1135,6 +1338,7 @@ def render(
         title_font,
         card_w - INSET * 2,
         3,
+        emoji_size=TITLE_SIZE,
     )
     meta = meta_line(result, len(items), is_ms)
 
