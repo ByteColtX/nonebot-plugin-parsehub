@@ -295,38 +295,30 @@ def _font(size: int, weight: int = 400) -> Any:  # noqa: ANN401 - PIL FreeTypeFo
     return font
 
 
-# 彩色 emoji 字体：OpenMoji Color（CBDT 位图，6.8MB，OFL）。
-# 没用 Twemoji Mozilla：那是 COLR 彩色字体，FreeType 按基字形的 bbox 去裁彩色
-# 图层，超出部分被切掉（Pillow issue #9146），实测 emoji 下半截连嘴巴一起不见。
-# CBDT 是位图字形，没有这个问题；代价是只有一档位图，别的字号得先画再缩。
-OPENMOJI_COMMIT = "aeb8bb3a59e2de39c754ac79180c8131c906acea"
-OPENMOJI_SHA256 = (
-    "c1bb01e2802eed4e7aab21f76af7e508b2da3e7c6a6acd222f16ad2cb9614788"
+# 彩色 emoji 字体：Twemoji 的 TrueType（CBDT 位图）构建，3.2MB。
+# 用这个而不是 Twemoji Mozilla：后者是 COLR 彩色字体，FreeType 按基字形的 bbox
+# 去裁彩色图层，超出部分被切掉（Pillow issue #9146），emoji 下半截连嘴巴不见。
+# 这份是社区从 Twemoji 素材构建的位图版本（上游图形 CC-BY 4.0），渲染正常。
+# 注意：release 资产被重传过（AUR 记的哈希与实测不符），所以标签和哈希都钉。
+TWEMOJI_TTF_TAG = "15.0.2"
+TWEMOJI_TTF_SHA256 = (
+    "2c96ffb14e104ebbc49a7b35303828f6131cf2752034dd79e2050d8795785a60"
 )
-OPENMOJI_PATH = "font/OpenMoji-color-cbdt/OpenMoji-color-cbdt.ttf"
 EMOJI_FONT_SOURCES: tuple[FontSource, ...] = (
     FontSource(
-        "https://raw.githubusercontent.com/hfg-gmuend/openmoji/"
-        f"{OPENMOJI_COMMIT}/{OPENMOJI_PATH}",
-        OPENMOJI_SHA256,
+        "https://github.com/JoeBlakeB/ttf-twemoji-aur/releases/download/"
+        f"{TWEMOJI_TTF_TAG}/Twemoji-{TWEMOJI_TTF_TAG}.ttf",
+        TWEMOJI_TTF_SHA256,
     ),
-    FontSource(
-        "https://github.com/hfg-gmuend/openmoji/raw/"
-        f"{OPENMOJI_COMMIT}/{OPENMOJI_PATH}",
-        OPENMOJI_SHA256,
-    ),
-    FontSource(
-        "https://cdn.jsdelivr.net/gh/hfg-gmuend/openmoji@"
-        f"{OPENMOJI_COMMIT}/{OPENMOJI_PATH}",
-        OPENMOJI_SHA256,
-    ),
+    # release 资产只有这一个正式地址（jsdelivr 只镜像仓库文件，镜像不了
+    # release），所以只有一条源；下不到时按既有逻辑退回「没有 emoji 字体」
 )
 EMOJI_FONT_URLS: tuple[str, ...] = tuple(
     source.url for source in EMOJI_FONT_SOURCES
 )
-EMOJI_FONT_NAME = "OpenMoji-color-cbdt.ttf"
-# CBDT 位图档位：这个字体只认 99px，画别的字号必须先按它画再缩
-EMOJI_STRIKE = 99
+EMOJI_FONT_NAME = "Twemoji-15.0.2.ttf"
+# CBDT 位图字体的档位由 _emoji_strike_font 动态探测（这份 Twemoji 是 61px），
+# 画别的字号必须先按档位画再缩
 # emoji 贴图高度占字号多少（中文墨迹大约 0.9 个字号高）
 EMOJI_RATIO = 0.92
 # emoji 底边落在基线下多少（占字号），跟文字重心对齐
@@ -374,8 +366,8 @@ def _emoji_font_file() -> Path | None:
 def _emoji_strike_font() -> Any:  # noqa: ANN401 - PIL FreeTypeFont
     """取 emoji 字体对象（位图字体只有固定档位）。
 
-    CBDT 位图字体按档位给字号，随便传一个数字会报 ``invalid pixel size``，所以先
-    试 :data:`EMOJI_STRIKE`，再退几个常见档位。
+    CBDT 位图字体按档位给字号，随便传一个数字会报 ``invalid pixel size``，所以从
+    小到大探一遍，第一个能开的就是它的档位。
 
     Returns:
         Pillow 字体对象；不可用时为 ``None``。
@@ -385,7 +377,8 @@ def _emoji_strike_font() -> Any:  # noqa: ANN401 - PIL FreeTypeFont
     path = _emoji_font_file()
     if path is None:
         return None
-    for size in (EMOJI_STRIKE, 109, 136, 128, 64, 32):
+    # 矢量字体任何字号都能开；位图字体只认它自带的那几档，得探一遍
+    for size in range(8, 300):
         try:
             return ImageFont.truetype(str(path), size)
         except Exception:  # noqa: BLE001 - 这个档位没有就试下一个
@@ -681,7 +674,6 @@ def _split_emoji(text: str) -> list[tuple[str, bool]]:
     return out
 
 
-@lru_cache(maxsize=256)
 @lru_cache(maxsize=256)
 def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int]:  # noqa: ANN401
     """把一段 emoji 画在透明小图上，缩到目标大小。
