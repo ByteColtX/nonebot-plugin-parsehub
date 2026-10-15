@@ -172,6 +172,255 @@ def _font(size: int, weight: int = 400) -> Any:  # noqa: ANN401 - PIL FreeTypeFo
     return font
 
 
+# 彩色 emoji 字体。Twemoji Mozilla 是 COLR 彩色字体：1.5MB、可任意字号。
+# 没用 Noto Color Emoji 是因为它是 11MB 的 CBDT 位图字体，只有 109px 一档，
+# 想画 58px 的标题得先按 109px 画再缩，armv7 上还要给每个 emoji 做缩放缓存。
+EMOJI_FONT_URLS: tuple[str, ...] = (
+    "https://github.com/mozilla/twemoji-colr/releases/download/v0.7.0/Twemoji.Mozilla.ttf",
+)
+EMOJI_FONT_NAME = "Twemoji.Mozilla.ttf"
+
+# 算作 emoji 的码点区间（含 ZWJ、变体符、区域指示符，组合序列不会被切开）。
+_EMOJI_RANGES: tuple[tuple[int, int], ...] = (
+    (0x1F000, 0x1FAFF), (0x1F1E6, 0x1F1FF), (0x2600, 0x27BF), (0x2300, 0x23FF),
+    (0x25A0, 0x25FF), (0x2B00, 0x2BFF), (0x2190, 0x21FF), (0x200D, 0x200D),
+    (0xFE00, 0xFE0F), (0x20E3, 0x20E3), (0x203C, 0x203C), (0x2049, 0x2049),
+    (0x2122, 0x2122), (0x2139, 0x2139), (0x24C2, 0x24C2), (0x3030, 0x3030),
+    (0x303D, 0x303D), (0x3297, 0x3297), (0x3299, 0x3299),
+)
+
+_EMOJI_FONT: Path | None = None
+_GLYPH_CACHE: dict[tuple[int, str], bool] = {}
+
+
+def _is_emoji_char(ch: str) -> bool:
+    """这个字符是不是 emoji 码点。
+
+    Args:
+        ch: 单个字符。
+
+    Returns:
+        落在 emoji 区间里为 ``True``。
+    """
+    code = ord(ch)
+    return any(low <= code <= high for low, high in _EMOJI_RANGES)
+
+
+@lru_cache(maxsize=1)
+def _emoji_font_file() -> Path | None:
+    """彩色 emoji 字体文件（不下载）。
+
+    Returns:
+        字体路径；没有时为 ``None``。
+    """
+    if _EMOJI_FONT is not None and _EMOJI_FONT.exists():
+        return _EMOJI_FONT
+    return None
+
+
+@lru_cache(maxsize=16)
+def _emoji_font(size: int) -> Any:  # noqa: ANN401 - PIL FreeTypeFont
+    """按字号取 emoji 字体对象。
+
+    Args:
+        size: 字号（像素）。
+
+    Returns:
+        Pillow 字体对象；不可用时为 ``None``（调用方退回原样绘制）。
+    """
+    from PIL import ImageFont
+
+    path = _emoji_font_file()
+    if path is None:
+        return None
+    try:
+        return ImageFont.truetype(str(path), size)
+    except Exception:  # noqa: BLE001 - 字体坏掉就当没有
+        return None
+
+
+def ensure_emoji_font(cache_dir: Path, url: str = "") -> Path | None:
+    """确保有一份彩色 emoji 字体，必要时下载到缓存目录。
+
+    失败不影响卡片渲染，只是标题里的 emoji 会退回原来的方块。
+
+    Args:
+        cache_dir: 插件缓存目录，下载的字体放在这里。
+        url: 自定义字体地址，留空则依次尝试 :data:`EMOJI_FONT_URLS`。
+
+    Returns:
+        字体文件路径；不可用时为 ``None``。
+    """
+    global _EMOJI_FONT  # noqa: PLW0603 - 单例式配置
+
+    if _EMOJI_FONT is not None and _EMOJI_FONT.exists():
+        return _EMOJI_FONT
+
+    local = cache_dir / EMOJI_FONT_NAME
+    if local.exists() and local.stat().st_size > 200_000:
+        _EMOJI_FONT = local
+        _emoji_font_file.cache_clear()
+        _emoji_font.cache_clear()
+        return local
+
+    for candidate in ([url] if url else []) + list(EMOJI_FONT_URLS):
+        if not candidate:
+            continue
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            with httpx.stream(
+                "GET", candidate, timeout=180, follow_redirects=True
+            ) as resp:
+                if resp.status_code != 200:
+                    continue
+                tmp = local.with_suffix(".part")
+                with tmp.open("wb") as handle:
+                    for chunk in resp.iter_bytes(1 << 16):
+                        handle.write(chunk)
+            if tmp.stat().st_size < 200_000:
+                tmp.unlink(missing_ok=True)
+                continue
+            tmp.replace(local)
+        except Exception as exc:  # noqa: BLE001 - 网络问题都算下载失败
+            logger.warning(f"[parsehub] emoji 字体下载失败 {candidate}: {exc}")
+            continue
+        logger.info(f"[parsehub] emoji 字体已下载 {local}")
+        _EMOJI_FONT = local
+        _emoji_font_file.cache_clear()
+        _emoji_font.cache_clear()
+        return local
+
+    logger.warning("[parsehub] 没有可用的 emoji 字体，标题里的 emoji 会是方块")
+    return None
+
+
+def _can_draw_emoji(font: Any, text: str) -> bool:  # noqa: ANN401 - PIL FreeTypeFont
+    """查 emoji 字体里有没有这段文字的字形。
+
+    用私用区字符当"必然缺字"的参照，避免把缺字画成方块。
+
+    Args:
+        font: emoji 字体对象。
+        text: 待画片段。
+
+    Returns:
+        有字形为 ``True``。
+    """
+    key = (id(font), text)
+    if key not in _GLYPH_CACHE:
+        try:
+            # 注意：COLR 彩色字体里"有字形"反而拿到空 mask，缺字才拿到 .notdef
+            # 方块。所以只能跟 .notdef 的 mask 比"不相等"，不能比"非空"。
+            missing = bytes(font.getmask("\ue123", mode="L"))
+            _GLYPH_CACHE[key] = bytes(font.getmask(text, mode="L")) != missing
+        except Exception:  # noqa: BLE001 - 取不到字形就当画不了
+            _GLYPH_CACHE[key] = False
+    return _GLYPH_CACHE[key]
+
+
+def _split_emoji(text: str) -> list[tuple[str, bool]]:
+    """把文本切成 (片段, 是否 emoji) 的序列。
+
+    Args:
+        text: 原始文本。
+
+    Returns:
+        片段列表，相邻同类字符合并，组合序列（ZWJ、变体符）不会被切开。
+    """
+    out: list[tuple[str, bool]] = []
+    buf = ""
+    flag: bool | None = None
+    for ch in text:
+        cur = _is_emoji_char(ch)
+        if flag is None or cur == flag:
+            buf += ch
+        else:
+            out.append((buf, flag))
+            buf = ch
+        flag = cur
+    if buf and flag is not None:
+        out.append((buf, flag))
+    return out
+
+
+@lru_cache(maxsize=256)
+def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int]:  # noqa: ANN401
+    """把一段 emoji 画在透明小图上。
+
+    单独画一个 emoji 时 Pillow 不会上色（只有整串都是 emoji 时才有这个毛病），
+    所以左边垫一个空格当"陪衬"，再把它画到裁剪区外面去。
+
+    Args:
+        chunk: emoji 片段。
+        size: 字号。
+
+    Returns:
+        ``(透明小图, 基线在图中 y, 墨迹左偏移)``；字体不可用时为空元组。
+    """
+    font = _emoji_font(size)
+    if font is None:
+        return ()
+    from PIL import Image, ImageDraw
+
+    advance = max(1, int(round(font.getlength(chunk))))
+    ascent, descent = font.getmetrics()
+    baseline = ascent + 2
+    pad = font.getlength(" ") or advance
+    tile = Image.new("RGBA", (advance + 8, ascent + descent + 8), (0, 0, 0, 0))
+    ImageDraw.Draw(tile).text(
+        (-pad, baseline), " " + chunk, font=font, fill=(255, 255, 255),
+        anchor="ls", embedded_color=True,
+    )
+    box = tile.getbbox()
+    if box is None:
+        return ()
+    return tile.crop(box), baseline - box[1], box[0]
+
+
+def draw_text(
+    draw: Any,  # noqa: ANN401 - PIL ImageDraw
+    xy: tuple[int, int],
+    text: str,
+    font: Any,  # noqa: ANN401 - PIL FreeTypeFont
+    fill: tuple[int, int, int],
+    emoji_size: int = 0,
+) -> None:
+    """画一行文字，emoji 段用彩色字体贴上去。
+
+    没有 emoji 字体时退化成普通的 ``draw.text``（emoji 会显示成方块）。
+
+    Args:
+        draw: ImageDraw 对象。
+        xy: 起始坐标（左上角，锚点同 ``draw.text`` 的默认值）。
+        text: 文本。
+        font: 正文字体。
+        fill: 颜色。
+        emoji_size: emoji 字号；0 表示不做 emoji 处理。
+    """
+    if not emoji_size or _emoji_font(emoji_size) is None:
+        draw.text(xy, text, font=font, fill=fill)
+        return
+
+    x, top = xy
+    baseline = top + font.getmetrics()[0]
+    for chunk, is_emoji in _split_emoji(text):
+        tile = _emoji_tile(chunk, emoji_size) if is_emoji else ()
+        if tile:
+            image, baseline_in_tile, left = tile
+            image_draw = getattr(draw, "_image", None)
+            if image_draw is None:  # pragma: no cover - ImageDraw 都有 _image
+                image_draw = draw.im
+            image_draw.paste(
+                image,
+                (int(x - left), int(baseline - baseline_in_tile)),
+                image,
+            )
+            x += _emoji_font(emoji_size).getlength(chunk)
+        else:
+            draw.text((x, top), chunk, font=font, fill=fill)
+            x += font.getlength(chunk)
+
+
 def set_font(path: Path) -> None:
     """指定字体文件并清掉字体缓存。
 
@@ -816,16 +1065,20 @@ def render(
     )
 
     draw = ImageDraw.Draw(canvas)
-    draw.text(
+    draw_text(
+        draw,
         (INSET + mark_w + 18, kicker_y),
         name.upper(),
-        font=kicker_font,
-        fill=(226, 226, 232),
+        kicker_font,
+        (226, 226, 232),
+        emoji_size=KICKER_SIZE,
     )
     for line in title_lines:
-        draw.text((INSET, y), line, font=title_font, fill=(255, 255, 255))
+        draw_text(draw, (INSET, y), line, title_font, (255, 255, 255),
+                  emoji_size=TITLE_SIZE)
         y += 70
-    draw.text((INSET, y + 8), meta, font=meta_font, fill=(214, 214, 222))
+    draw_text(draw, (INSET, y + 8), meta, meta_font, (214, 214, 222),
+              emoji_size=META_SIZE)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.convert("RGB").save(out_path, "JPEG", quality=92)

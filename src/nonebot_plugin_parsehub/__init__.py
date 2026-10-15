@@ -1085,6 +1085,8 @@ async def _render_card(
         font = await asyncio.to_thread(card.ensure_font, server.cache_root())
         if font is None:
             return None
+        # 彩色 emoji 字体：拿不到就算了，标题里的 emoji 会退回方块
+        await asyncio.to_thread(card.ensure_emoji_font, server.cache_root())
         cover = await asyncio.to_thread(card.fetch_cover, result, files, proxy)
         if cover is None:
             logger.info("[parsehub] 没有可用封面，卡片跳过")
