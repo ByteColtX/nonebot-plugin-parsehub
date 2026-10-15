@@ -86,10 +86,23 @@ def test_emoji_tile_is_colored(card) -> None:
     assert colorful > 50, f"贴图里彩色像素太少（{colorful}）"
 
 
-def test_ensure_emoji_font_caches_existing_file(card, tmp_path: Path) -> None:
-    """缓存目录里已经有字体时直接用，不联网。"""
+def test_ensure_emoji_font_caches_existing_file(card, tmp_path, monkeypatch) -> None:
+    """缓存目录里已经有字体、且 sha256 对得上时直接用，不联网。"""
+    import hashlib
+
+    payload = b"\x00" * 300_000
     font = tmp_path / card.EMOJI_FONT_NAME
-    font.write_bytes(b"\x00" * 300_000)
+    font.write_bytes(payload)
+    monkeypatch.setattr(
+        card,
+        "EMOJI_FONT_SOURCES",
+        (
+            card.FontSource(
+                "https://example.test/Twemoji.Mozilla.ttf",
+                hashlib.sha256(payload).hexdigest(),
+            ),
+        ),
+    )
     card._EMOJI_FONT = None
     card._emoji_font_file.cache_clear()
     assert card.ensure_emoji_font(tmp_path) == font

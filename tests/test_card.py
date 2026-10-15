@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -213,10 +214,17 @@ def test_render_without_font_raises(tmp_path: Path, card) -> None:
         card.set_font(FONT)
 
 
-def test_ensure_font_prefers_local_file(tmp_path: Path, card) -> None:
-    """缓存目录里已有字体时不再下载。"""
+def test_ensure_font_prefers_local_file(tmp_path: Path, card, monkeypatch) -> None:
+    """缓存目录里已有字体、且 sha256 对得上时不再下载。"""
     local = tmp_path / "NotoSansSC.ttf"
-    local.write_bytes(FONT.read_bytes() + b"\0" * 1_000_000)
+    payload = FONT.read_bytes() + b"\0" * 1_000_000
+    local.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(
+        card,
+        "FONT_SOURCES",
+        (card.FontSource("https://example.test/NotoSansSC.ttf", digest),),
+    )
     card._CUSTOM_FONT = None  # noqa: SLF001
     card._font_file.cache_clear()  # noqa: SLF001
     assert card.ensure_font(tmp_path) == local

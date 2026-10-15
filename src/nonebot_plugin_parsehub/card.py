@@ -17,8 +17,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -34,15 +36,49 @@ ASSET_DIR = Path(__file__).resolve().parent / "assets" / "logos"
 # 报告 12，cv2 量出 30fps × 366 帧 = 12.20s，早先当毫秒会显示成 00:00）。
 _MS_PLATFORMS = frozenset({"douyin", "xhs"})
 
-# 中文字体候选下载地址（按顺序尝试）。
-FONT_URLS: tuple[str, ...] = (
-    "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanssc/"
-    "NotoSansSC%5Bwght%5D.ttf",
-    "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/"
-    "NotoSansSC%5Bwght%5D.ttf",
-    "https://github.com/google/fonts/raw/main/ofl/notosanssc/"
-    "NotoSansSC%5Bwght%5D.ttf",
+@dataclass(frozen=True)
+class FontSource:
+    """一个字体下载源。
+
+    URL 必须钉在具体版本上（提交 SHA / release tag），不能跟着分支走；下载后按
+    ``sha256`` 校验，不匹配就丢掉换下一个源。
+
+    Attributes:
+        url: 下载地址。
+        sha256: 该文件的小写十六进制 sha256。
+    """
+
+    url: str
+    sha256: str
+
+
+# 中文字体（Noto Sans SC 可变字重）。钉在 google/fonts 的这次提交上，
+# 不跟 main 分支走：
+# 上游一改文件，缓存里那份和线上就不是同一个东西了。
+NOTO_SANS_SC_COMMIT = "a85815a42757630ce188fdad368c2dfc444d4773"
+NOTO_SANS_SC_SHA256 = (
+    "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da"
 )
+NOTO_SANS_SC_PATH = "ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+
+FONT_SOURCES: tuple[FontSource, ...] = (
+    FontSource(
+        "https://raw.githubusercontent.com/google/fonts/"
+        f"{NOTO_SANS_SC_COMMIT}/{NOTO_SANS_SC_PATH}",
+        NOTO_SANS_SC_SHA256,
+    ),
+    FontSource(
+        "https://github.com/google/fonts/raw/"
+        f"{NOTO_SANS_SC_COMMIT}/{NOTO_SANS_SC_PATH}",
+        NOTO_SANS_SC_SHA256,
+    ),
+    FontSource(
+        "https://cdn.jsdelivr.net/gh/google/fonts@"
+        f"{NOTO_SANS_SC_COMMIT}/{NOTO_SANS_SC_PATH}",
+        NOTO_SANS_SC_SHA256,
+    ),
+)
+FONT_URLS: tuple[str, ...] = tuple(source.url for source in FONT_SOURCES)
 
 # 系统里可能已经有这些中文字体，有就直接用，不必下载。
 SYSTEM_FONTS: tuple[str, ...] = (
@@ -54,6 +90,90 @@ SYSTEM_FONTS: tuple[str, ...] = (
     "/System/Library/Fonts/PingFang.ttc",
     "C:/Windows/Fonts/msyh.ttc",
 )
+
+
+def _sha256_of(path: Path) -> str:
+    """算文件的 sha256。
+
+    Args:
+        path: 文件路径。
+
+    Returns:
+        小写十六进制摘要。
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _matches_sources(path: Path, sources: tuple[FontSource, ...]) -> bool:
+    """文件是不是等于某个已知源（按 sha256）。
+
+    Args:
+        path: 待校验文件。
+        sources: 允许的来源列表。
+
+    Returns:
+        命中任一来源的 sha256 为 ``True``；
+        ``sources`` 为空（或都没写 sha256）时不做校验，直接 ``True``。
+    """
+    expected = [source.sha256 for source in sources if source.sha256]
+    if not expected:
+        return True
+    actual = _sha256_of(path)
+    if actual in expected:
+        return True
+    logger.warning(
+        f"[parsehub] 字体 sha256 对不上，已丢弃 {path}（实际 {actual[:12]}…）"
+    )
+    return False
+
+
+def _fetch_font(
+    source: FontSource,
+    target: Path,
+    min_size: int,
+) -> bool:
+    """下载一个字体源并校验 sha256。
+
+    校验不通过的文件会直接丢掉，绝不落到 ``target``。
+
+    Args:
+        source: 字体源（地址 + 期望 sha256）。
+        target: 目标路径。
+        min_size: 小于这个字节数就当作没下全。
+
+    Returns:
+        下载并校验成功为 ``True``。
+    """
+    tmp = target.with_suffix(".part")
+    landed = False
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with httpx.stream(
+            "GET", source.url, timeout=180, follow_redirects=True
+        ) as resp:
+            if resp.status_code != 200:
+                return False
+            with tmp.open("wb") as handle:
+                for chunk in resp.iter_bytes(1 << 16):
+                    handle.write(chunk)
+        if tmp.stat().st_size < min_size:
+            return False
+        if source.sha256 and not _matches_sources(tmp, (source,)):
+            return False
+        tmp.replace(target)
+        landed = True
+    except Exception as exc:  # noqa: BLE001 - 网络问题都算下载失败
+        logger.warning(f"[parsehub] 字体下载失败 {source.url}: {exc}")
+        return False
+    finally:
+        if not landed and tmp.exists():
+            tmp.unlink(missing_ok=True)
+    logger.info(f"[parsehub] 字体已下载并校验 {target}")
+    return True
 
 # 平台 → (展示名, 品牌色, logo 文件名)
 # key 用 parsehub 的 platform.id（xhs/coolapk/… 都是它的原始 id）。
@@ -175,8 +295,19 @@ def _font(size: int, weight: int = 400) -> Any:  # noqa: ANN401 - PIL FreeTypeFo
 # 彩色 emoji 字体。Twemoji Mozilla 是 COLR 彩色字体：1.5MB、可任意字号。
 # 没用 Noto Color Emoji 是因为它是 11MB 的 CBDT 位图字体，只有 109px 一档，
 # 想画 58px 的标题得先按 109px 画再缩，armv7 上还要给每个 emoji 做缩放缓存。
-EMOJI_FONT_URLS: tuple[str, ...] = (
-    "https://github.com/mozilla/twemoji-colr/releases/download/v0.7.0/Twemoji.Mozilla.ttf",
+TWEMOJI_TAG = "v0.7.0"
+TWEMOJI_SHA256 = (
+    "6d90152ee0d29e82fe2a87793af5aa4b7ad13e6538360889e141e81ed299ee8e"
+)
+EMOJI_FONT_SOURCES: tuple[FontSource, ...] = (
+    FontSource(
+        "https://github.com/mozilla/twemoji-colr/releases/download/"
+        f"{TWEMOJI_TAG}/Twemoji.Mozilla.ttf",
+        TWEMOJI_SHA256,
+    ),
+)
+EMOJI_FONT_URLS: tuple[str, ...] = tuple(
+    source.url for source in EMOJI_FONT_SOURCES
 )
 EMOJI_FONT_NAME = "Twemoji.Mozilla.ttf"
 
@@ -258,37 +389,24 @@ def ensure_emoji_font(cache_dir: Path, url: str = "") -> Path | None:
 
     local = cache_dir / EMOJI_FONT_NAME
     if local.exists() and local.stat().st_size > 200_000:
-        _EMOJI_FONT = local
-        _emoji_font_file.cache_clear()
-        _emoji_font.cache_clear()
-        return local
+        if _matches_sources(local, EMOJI_FONT_SOURCES):
+            _EMOJI_FONT = local
+            _emoji_font_file.cache_clear()
+            _emoji_font.cache_clear()
+            return local
+        local.unlink(missing_ok=True)  # 校验不过就重下
 
-    for candidate in ([url] if url else []) + list(EMOJI_FONT_URLS):
-        if not candidate:
-            continue
-        try:
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            with httpx.stream(
-                "GET", candidate, timeout=180, follow_redirects=True
-            ) as resp:
-                if resp.status_code != 200:
-                    continue
-                tmp = local.with_suffix(".part")
-                with tmp.open("wb") as handle:
-                    for chunk in resp.iter_bytes(1 << 16):
-                        handle.write(chunk)
-            if tmp.stat().st_size < 200_000:
-                tmp.unlink(missing_ok=True)
-                continue
-            tmp.replace(local)
-        except Exception as exc:  # noqa: BLE001 - 网络问题都算下载失败
-            logger.warning(f"[parsehub] emoji 字体下载失败 {candidate}: {exc}")
-            continue
-        logger.info(f"[parsehub] emoji 字体已下载 {local}")
+    if url and _fetch_font(FontSource(url, ""), local, 200_000):
         _EMOJI_FONT = local
         _emoji_font_file.cache_clear()
         _emoji_font.cache_clear()
         return local
+    for source in EMOJI_FONT_SOURCES:
+        if _fetch_font(source, local, 200_000):
+            _EMOJI_FONT = local
+            _emoji_font_file.cache_clear()
+            _emoji_font.cache_clear()
+            return local
 
     logger.warning("[parsehub] 没有可用的 emoji 字体，标题里的 emoji 会是方块")
     return None
@@ -450,41 +568,30 @@ def ensure_font(cache_dir: Path, url: str = "") -> Path | None:
 
     local = cache_dir / "NotoSansSC.ttf"
     if local.exists() and local.stat().st_size > 1_000_000:
-        _CUSTOM_FONT = local
-        _font_file.cache_clear()
-        _font.cache_clear()
-        return local
+        if _matches_sources(local, FONT_SOURCES):
+            _CUSTOM_FONT = local
+            _font_file.cache_clear()
+            _font.cache_clear()
+            return local
+        local.unlink(missing_ok=True)  # 校验不过就重下，不留着用
 
     system = _font_file()
     if system is not None:
         return system
 
-    for candidate in ([url] if url else []) + list(FONT_URLS):
-        if not candidate:
-            continue
-        try:
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            with httpx.stream(
-                "GET", candidate, timeout=120, follow_redirects=True
-            ) as resp:
-                if resp.status_code != 200:
-                    continue
-                tmp = local.with_suffix(".part")
-                with tmp.open("wb") as handle:
-                    for chunk in resp.iter_bytes(1 << 16):
-                        handle.write(chunk)
-            if tmp.stat().st_size < 1_000_000:
-                tmp.unlink(missing_ok=True)
-                continue
-            tmp.replace(local)
-        except Exception as exc:  # noqa: BLE001 - 网络问题都算下载失败
-            logger.warning(f"[parsehub] 字体下载失败 {candidate}: {exc}")
-            continue
-        logger.info(f"[parsehub] 字体已下载 {local}")
-        _CUSTOM_FONT = local
-        _font_file.cache_clear()
-        _font.cache_clear()
-        return local
+    if url:
+        # 自定义地址没法预先知道 sha256，只能下下来就用；出问题由调用方负责。
+        if _fetch_font(FontSource(url, ""), local, 1_000_000):
+            _CUSTOM_FONT = local
+            _font_file.cache_clear()
+            _font.cache_clear()
+            return local
+    for source in FONT_SOURCES:
+        if _fetch_font(source, local, 1_000_000):
+            _CUSTOM_FONT = local
+            _font_file.cache_clear()
+            _font.cache_clear()
+            return local
     logger.warning("[parsehub] 没有可用字体，卡片功能关闭")
     return None
 
