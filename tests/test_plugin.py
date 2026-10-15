@@ -122,17 +122,17 @@ def _reset_state(plugin, core, monkeypatch):
 def test_proxy_only_applies_to_listed_platforms(plugin, monkeypatch, core):
     """代理默认只给海外平台走，国内平台直连。"""
     cfg = plugin.plugin_config
-    monkeypatch.setattr(cfg, "parsehub_proxy", "http://192.168.12.25:6152")
+    monkeypatch.setattr(cfg, "parsehub_proxy", "http://127.0.0.1:7890")
 
     # 默认列表 = 海外平台
-    assert core.proxy_for("youtube") == "http://192.168.12.25:6152"
-    assert core.proxy_for("twitter") == "http://192.168.12.25:6152"
+    assert core.proxy_for("youtube") == "http://127.0.0.1:7890"
+    assert core.proxy_for("twitter") == "http://127.0.0.1:7890"
     assert core.proxy_for("bilibili") == ""
     assert core.proxy_for("douyin") == ""
 
     # 留空列表 = 所有平台都走
     monkeypatch.setattr(cfg, "parsehub_proxy_platforms", [])
-    assert core.proxy_for("bilibili") == "http://192.168.12.25:6152"
+    assert core.proxy_for("bilibili") == "http://127.0.0.1:7890"
 
     # 没配代理 = 一律直连
     monkeypatch.setattr(cfg, "parsehub_proxy", "")

@@ -781,7 +781,7 @@ def draw_text(
             if tile:
                 image, baseline_in_tile, left, advance = tile
                 image_draw = getattr(draw, "_image", None)
-                if image_draw is None:  # pragma: no cover - ImageDraw 都有 _image
+                if image_draw is None:  # pragma: no cover - 都有这个属性
                     image_draw = draw.im
                 image_draw.paste(
                     image,
@@ -1201,7 +1201,8 @@ def _vertical_mask(
 ) -> Any:  # noqa: ANN401 - PIL Image
     """用 numpy 一次算出竖直渐变遮罩。
 
-    逐行画线在 armv7 上会长时间占着 GIL，放线程里也会把事件循环卡住。
+    逐行画线会长时间占着 GIL，放线程里也会把事件循环卡住，所以整张图一次性
+    拼好再输出。
 
     Args:
         size: 遮罩尺寸 ``(宽, 高)``。
@@ -1381,7 +1382,7 @@ def render(
     scale = max(card_w / cover_image.width, card_h / cover_image.height)
     big = cover_image.resize(
         (int(cover_image.width * scale), int(cover_image.height * scale)),
-        Image.BICUBIC,  # LANCZOS 在 armv7 上要 150ms+
+        Image.BICUBIC,  # LANCZOS 在慢机器上要 150ms+
     )
     left = (big.width - card_w) // 2
     top = int((big.height - card_h) * 0.28)

@@ -210,7 +210,7 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 - parsehub 全程是同步阻塞的，插件把所有调用放进 `asyncio.to_thread`，不会阻塞事件循环
 - 解析器首次导入需要几秒（numpy + opencv），插件采用懒加载，不影响机器人启动
 - 信息卡片用 Pillow 画，封面三级兜底：`thumb_url` → 本身就是图片的媒体 → 本地视频抽首帧；
-  渲染走 `asyncio.to_thread`（armv7 上单张约 0.3s），没装 Pillow 或没有中文字体时自动退回纯文字
+  渲染走 `asyncio.to_thread`（低端设备上单张约 0.3s），没装 Pillow 或没有中文字体时自动退回纯文字
 - 中文字体优先用 `PARSEHUB_CARD_FONT`，其次是插件缓存目录里的
   `HarmonyOS_Sans_SC_Regular.ttf`，再是系统字体，都没有才下载（首次下载约 8MB，
   之后走缓存；下载源钉在固定提交上并做 sha256 校验）

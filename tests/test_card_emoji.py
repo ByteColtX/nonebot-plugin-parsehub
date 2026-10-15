@@ -59,7 +59,7 @@ def test_draw_text_without_emoji_font(card) -> None:
 
 
 @pytest.mark.skipif(
-    not _EMOJI_FONT_HINT.exists(), reason="本机没有 emoji 字体（onecloud 上会自动下载）"
+    not _EMOJI_FONT_HINT.exists(), reason="本地没有 emoji 字体（部署时会自动下载）"
 )
 def test_emoji_tile_scales_bitmap_strike(card) -> None:
     """位图字体只有固定档位，贴图必须缩到「字号 × 比例」。"""
@@ -81,7 +81,7 @@ def test_emoji_tile_scales_bitmap_strike(card) -> None:
 
 
 @pytest.mark.skipif(
-    not _EMOJI_FONT_HINT.exists(), reason="本机没有 emoji 字体（onecloud 上会自动下载）"
+    not _EMOJI_FONT_HINT.exists(), reason="本地没有 emoji 字体（部署时会自动下载）"
 )
 def test_emoji_tile_is_colored(card) -> None:
     """emoji 贴图必须真的带上颜色，而不是空白。"""

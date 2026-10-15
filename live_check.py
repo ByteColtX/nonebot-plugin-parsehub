@@ -7,8 +7,8 @@
 
     uv run python live_check.py [url] [proxy]
 
-需要联网；在本机和 onecloud 上都能跑，onecloud 上要带 ``LD_LIBRARY_PATH``
-和机器人所在 venv 的解释器。
+需要联网；在开发机和部署机上都可跑，部署机上建议直接用机器人所在 venv 的
+解释器（系统库不全时按需补 ``LD_LIBRARY_PATH``）。
 """
 
 from __future__ import annotations

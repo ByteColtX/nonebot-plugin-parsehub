@@ -1458,7 +1458,7 @@ driver = get_driver()
 
 @driver.on_startup
 async def _warm_parsehub() -> None:
-    """后台预热 parsehub（首次 import numpy + opencv 在 armv7 上要几秒）。
+    """后台预热 parsehub（首次 import numpy + opencv 在慢机器上要几秒）。
 
     平台白名单和解析都要用到 hub，第一次调用如果落在消息处理里，会把「收到」
     表情拖慢好几秒，所以启动后就先在后台把它 import 好，不阻塞启动。
