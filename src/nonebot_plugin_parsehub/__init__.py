@@ -192,7 +192,35 @@ def _short_error(exc: BaseException) -> str:
     text = str(exc).strip()
     for word in _ERROR_NOISE:
         text = text.replace(f"{word}: ", "").replace(f"{word}：", "")
-    return text.strip() or type(exc).__name__
+    text = text.strip()
+    if not text:
+        return type(exc).__name__
+    # 2.3.10 起「所有解析方式均失败」会把每一层的原因列成多行，QQ 里发不出去，
+    # 压成「一句话（第一层原因）」。
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) > 1:
+        head = lines[0].rstrip(":：")
+        first = lines[1].lstrip("-").strip()
+        text = f"{head}（{first}）" if first else head
+    return _truncate_error(text)
+
+
+# 错误提示最长留多少个字（QQ 气泡里一行放不下更长的）。
+_ERROR_MAX_CHARS = 80
+
+
+def _truncate_error(text: str) -> str:
+    """错误提示太长时截断。
+
+    Args:
+        text: 错误描述。
+
+    Returns:
+        不超过 :data:`_ERROR_MAX_CHARS` 个字的描述。
+    """
+    if len(text) <= _ERROR_MAX_CHARS:
+        return text
+    return text[: _ERROR_MAX_CHARS - 1] + "…"
 
 
 # 命令触发时用来跳过自动解析的前缀。
@@ -322,9 +350,8 @@ def _is_content_unavailable(exc: BaseException) -> bool:
     Returns:
         作品不可用类错误返回 True。
     """
-    return type(
-        exc
-    ).__name__ == "ContentUnavailableError" or "作品不可用" in str(exc)
+    name = type(exc).__name__
+    return "ContentUnavailable" in name or "作品不可用" in str(exc)
 
 
 def _failure_notice(exc: BaseException) -> str:

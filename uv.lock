@@ -1117,7 +1117,7 @@ requires-dist = [
     { name = "nonebot-adapter-onebot", specifier = ">=2.4.6,<3.0.0" },
     { name = "nonebot-plugin-localstore", specifier = ">=0.7.4,<1.0.0" },
     { name = "nonebot2", specifier = ">=2.5.0,<3.0.0" },
-    { name = "parsehub", specifier = ">=2.3.3,<3.0.0" },
+    { name = "parsehub", specifier = ">=2.3.10,<3.0.0" },
     { name = "pillow", specifier = ">=12.1.0,<13.0.0" },
     { name = "pydantic", specifier = ">=2.0.0,<3.0.0" },
 ]
@@ -1304,7 +1304,7 @@ wheels = [
 
 [[package]]
 name = "parsehub"
-version = "2.3.3"
+version = "2.3.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -1328,11 +1328,12 @@ dependencies = [
     { name = "signerpy" },
     { name = "tenacity" },
     { name = "urlextract" },
+    { name = "xhshow" },
     { name = "yt-dlp", extra = ["default"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d0/7e/5254929279dfa2eeeb31ac1df360615a46ea0522117a8ea3aa06de5d3f2d/parsehub-2.3.3.tar.gz", hash = "sha256:e4bead4ad18e70468ba2c6436a82307e5e659d5b770dda2767550971d0542888", size = 131178, upload-time = "2026-10-10T10:37:11.325Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/40/1d17a2b67818998b2cca0e1663ef5cb2a389a2cdb47dc732324bd8cbe7bd/parsehub-2.3.10.tar.gz", hash = "sha256:747fa64fec6ddc36e387cbf34e8503468deae7c56e2f9bc7a26701e74a8e51a3", size = 133913, upload-time = "2026-10-15T17:43:40.536Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/19/428a791b39c2425f9968363bbeacf0e2b9588d8cd2549cabe6ec67eb1938/parsehub-2.3.3-py3-none-any.whl", hash = "sha256:b9dfa8fe0121cb440afc83221e83560dd7081aac8fada8b905551658514d9e67", size = 147948, upload-time = "2026-10-10T10:37:09.86Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/de/57ddd9b370342ba262d22a051e22a0a1ba2e381ed344f72e9b920c8cf176/parsehub-2.3.10-py3-none-any.whl", hash = "sha256:24dffd0a6fb1cde5c9ef61a0ad1834d58c0d8a37a0be3c64135f83683988f08a", size = 151038, upload-time = "2026-10-15T17:43:38.807Z" },
 ]
 
 [[package]]
@@ -2321,6 +2322,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b3/8f/705086c9d734d3b663af0e9bb3d4de6578d08f46b1b101c2442fd9aecaa2/win32_setctime-1.2.0.tar.gz", hash = "sha256:ae1fdf948f5640aae05c511ade119313fb6a30d7eabe25fef9764dca5873c4c0", size = 4867, upload-time = "2024-12-07T15:28:28.314Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e1/07/c6fe3ad3e685340704d314d765b7912993bcb8dc198f0e7a89382d37974b/win32_setctime-1.2.0-py3-none-any.whl", hash = "sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390", size = 4083, upload-time = "2024-12-07T15:28:26.465Z" },
+]
+
+[[package]]
+name = "xhshow"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pycryptodome" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/17/16/4305d7a372e41b0cf24e9315f1e9a49a3c9ca7fe1229b7da5737e9096a68/xhshow-0.2.0.tar.gz", hash = "sha256:1ae45ce889d0041d57b6eff5dbcbcc31a06f3df351c80b4a50bac983a0e1fe44", size = 65626, upload-time = "2026-06-11T11:11:10.614Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/6a/4e227e0724606b1965b0036d9558fe25073e46f4ba11b47721e125b3caa3/xhshow-0.2.0-py3-none-any.whl", hash = "sha256:4de6f632ff911621b55335f7772187dcd4eed414142057120a37bfd46ca6d4bb", size = 40918, upload-time = "2026-06-11T11:11:09.696Z" },
 ]
 
 [[package]]

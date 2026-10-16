@@ -89,6 +89,10 @@ _TRAILING_CHARS = "。，、；：！？)）】》\"'"
 # 探测文件体积的超时（秒）。
 _PROBE_TIMEOUT_SECONDS = 15.0
 
+# 多文件并发下载数（parsehub 2.3.10 起支持）。下载以网络等待为主，并发比串行快
+# 很多；但内存只有 1G 上下的机器别开太大。
+DOWNLOAD_CONCURRENCY = 8
+
 
 def extract_urls(text: str) -> list[str]:
     """从消息文本里挑出可能受支持的链接。
@@ -445,6 +449,7 @@ class ParseHubClient:
         path: str,
         proxy: str = "",
         cookie: str = "",
+        concurrency: int = DOWNLOAD_CONCURRENCY,
     ) -> Any:
         """解析并下载媒体到指定目录。
 
@@ -453,6 +458,7 @@ class ParseHubClient:
             path: 下载目录。
             proxy: 解析与下载共用的代理。
             cookie: 登录态 cookie。
+            concurrency: 多文件并发下载数。
 
         Returns:
             ParseHub 的下载结果对象，``media`` 里是本地文件。
@@ -468,6 +474,7 @@ class ParseHubClient:
             proxy=proxy or None,
             parse_proxy=proxy or None,
             parse_cookie=cookie or None,
+            concurrency=concurrency,
         )
 
     async def download_parsed(
@@ -475,6 +482,7 @@ class ParseHubClient:
         result: Any,
         path: str,
         proxy: str = "",
+        concurrency: int = DOWNLOAD_CONCURRENCY,
     ) -> Any:
         """用已经解析好的结果下载媒体，不再解析一遍。
 
@@ -489,6 +497,7 @@ class ParseHubClient:
             result: ``parse()`` 返回的解析结果。
             path: 下载目录。
             proxy: 下载代理。
+            concurrency: 多文件并发下载数。
 
         Returns:
             ParseHub 的下载结果对象，``media`` 里是本地文件。
@@ -500,6 +509,7 @@ class ParseHubClient:
             result.download_sync,
             path,
             proxy=proxy or None,
+            concurrency=concurrency,
         )
 
 

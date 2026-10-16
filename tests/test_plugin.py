@@ -623,6 +623,62 @@ def test_short_error_strips_nested_prefixes(plugin):
     assert plugin._short_error(RuntimeError("")) == "RuntimeError"
 
 
+def test_short_error_flattens_fallback_error(plugin):
+    """2.3.10 的「所有解析方式均失败」是多行，QQ 里只能发一句话。"""
+    exc = RuntimeError(
+        "所有解析方式均失败:\n"
+        "- 网页解析: HTTP错误: 403\n"
+        "- 移动端: 作品不可用"
+    )
+    assert plugin._short_error(exc) == "所有解析方式均失败（网页解析: HTTP错误: 403）"
+    # 超长的也要截断，别在气泡里刷一屏
+    long = RuntimeError("解析失败：" + "很长的原因" * 40)
+    assert len(plugin._short_error(long)) == plugin._ERROR_MAX_CHARS
+
+
+def test_content_unavailable_covers_fallback_variant(plugin):
+    """新的 ContentUnavailableFallbackError 也要被认成「作品不可用」。"""
+    from parsehub.errors import ContentUnavailableFallbackError
+
+    exc = ContentUnavailableFallbackError([])
+    assert plugin._is_content_unavailable(exc) is True
+    assert plugin._failure_notice(exc) == "这个作品已经不可用了（可能被删了）。"
+
+
+@pytest.mark.asyncio
+async def test_download_uses_concurrency(core, tmp_media, monkeypatch):
+    """下载要带上并发数，否则又退回逐张串行。"""
+    seen: dict[str, object] = {}
+
+    class FakeResult:
+        def download_sync(self, path, **kwargs):
+            seen.update(kwargs)
+            return "parsed-ok"
+
+    class FakeHub:
+        def download_sync(self, url, path, **kwargs):
+            seen.update(kwargs)
+            return "hub-ok"
+
+    # conftest 会把 CLIENT.download_parsed 换成一个委托，这里要考真实现，
+    # 所以直接调类上的方法。
+    client = core.ParseHubClient()
+    monkeypatch.setattr(
+        client, "hub", lambda: asyncio.sleep(0, result=FakeHub())
+    )
+
+    assert await core.ParseHubClient.download_parsed(
+        client, FakeResult(), str(tmp_media)
+    ) == "parsed-ok"
+    assert seen["concurrency"] == core.DOWNLOAD_CONCURRENCY > 1
+
+    seen.clear()
+    assert await core.ParseHubClient.download(client, "u", str(tmp_media)) == (
+        "hub-ok"
+    )
+    assert seen["concurrency"] == core.DOWNLOAD_CONCURRENCY
+
+
 def _patch_failing_download(core, monkeypatch, tmp_media, calls, failures):
     """造一个「前 N 次失败、之后成功」的下载。"""
     img = tmp_media / "pic.jpg"
