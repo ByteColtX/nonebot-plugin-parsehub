@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -20,137 +21,179 @@ def _files(tmp_path: Path, *names: str, size: int = 1024) -> list[Path]:
     return out
 
 
-def test_slugify(mediacache) -> None:
-    """作品 key 里的冒号和斜杠要变成安全的目录名。"""
-    assert (
-        mediacache.slugify("bilibili:bv1yupv6yeue") == "bilibili_bv1yupv6yeue"
-    )
-    assert mediacache.slugify("b23.tv/3xdwepo") == "b23.tv_3xdwepo"
+def _age(entry: Path, seconds: int) -> None:
+    """把条目的最后使用时间调旧（直接改 meta，TTL 以它为准）。"""
+    meta_path = entry / "meta.json"
+    meta = json.loads(meta_path.read_text("utf-8"))
+    meta["updated_at"] = time.time() - seconds
+    meta_path.write_text(json.dumps(meta), "utf-8")
 
 
-def test_store_then_get(tmp_path: Path, mediacache) -> None:
-    """存进去能取出来，媒体文件在。"""
-    cache = mediacache.MediaCache(
-        tmp_path / "media", ttl_seconds=3600, max_bytes=0
-    )
+def _meta(entry: Path) -> dict:
+    """读条目的 meta。"""
+    return json.loads((entry / "meta.json").read_text("utf-8"))
+
+
+def test_entry_name_is_hashed_and_stable(cache) -> None:
+    """目录名由 key 摘要而来：不可猜、同 key 稳定、不同 key 不撞。"""
+    name = cache.entry_name("bilibili:BV1yupv6yeue")
+    assert name.startswith("h_")
+    assert len(name) == len("h_") + 20
+    assert name == cache.entry_name("bilibili:BV1yupv6yeue")
+    assert name != cache.entry_name("bilibili:BV1yupv6yeuf")
+    assert "bilibili" not in name
+
+
+def test_store_then_get(tmp_path: Path, cache, card) -> None:
+    """存进去能取出来，媒体、卡片、文字、时长都在。"""
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
     files = _files(tmp_path, "a.jpg", "b.mp4")
-    entry = cache.store(["bilibili:bv1"], files, caption="标题")
+    card = tmp_path / "card.jpg"
+    card.write_bytes(b"card")
+    entry = store.store(
+        ["bilibili:bv1"], files, card=card, caption="标题", seconds=42
+    )
     assert entry is not None
 
-    hit = cache.get("bilibili:bv1")
-    assert hit == entry
-    names = [item.name for item in mediacache.MediaCache.media_files(hit)]
-    assert names == ["a.jpg", "b.mp4"]
-    assert mediacache.MediaCache.card_path(hit) is None
-    caption = mediacache.MediaCache.caption_path(hit)
-    assert caption is not None and caption.read_text("utf-8") == "标题"
+    hit = store.get("bilibili:bv1")
+    assert hit is not None
+    assert hit.root == entry
+    assert [item.name for item in hit.files] == ["a.jpg", "b.mp4"]
+    assert hit.card is not None and hit.card.read_bytes() == b"card"
+    assert hit.caption == "标题"
+    assert hit.seconds == 42
+    assert hit.keys == ("bilibili:bv1",)
 
 
-def test_get_missing_key(tmp_path: Path, mediacache) -> None:
+def test_get_missing_key(tmp_path: Path, cache) -> None:
     """没缓存过的 key 返回 None。"""
-    cache = mediacache.MediaCache(
-        tmp_path / "media", ttl_seconds=3600, max_bytes=0
-    )
-    assert cache.get("douyin:123456") is None
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
+    assert store.get("douyin:123456") is None
 
 
-def test_disabled_cache(tmp_path: Path, mediacache) -> None:
+def test_disabled_cache(tmp_path: Path, cache) -> None:
     """ttl 为 0 就是不缓存：不写也不读。"""
-    cache = mediacache.MediaCache(
-        tmp_path / "media", ttl_seconds=0, max_bytes=0
-    )
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=0, max_bytes=0)
     files = _files(tmp_path, "a.jpg")
-    assert cache.store(["k"], files) is None
-    assert cache.get("k") is None
+    assert store.store(["k"], files) is None
+    assert store.get("k") is None
 
 
-def test_expired_entry_is_gone(tmp_path: Path, mediacache) -> None:
+def test_store_without_files_is_noop(tmp_path: Path, cache) -> None:
+    """没有媒体就不建条目（纯文字帖不进缓存）。"""
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
+    assert store.store(["k"], []) is None
+    assert store.get("k") is None
+
+
+def test_expired_entry_is_gone(tmp_path: Path, cache) -> None:
     """超过 ttl 的条目读不到，sweep 会把它删掉。"""
-    cache = mediacache.MediaCache(
-        tmp_path / "media", ttl_seconds=60, max_bytes=0
-    )
-    entry = cache.store(["k"], _files(tmp_path, "a.jpg"))
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=60, max_bytes=0)
+    entry = store.store(["k"], _files(tmp_path, "a.jpg"))
     assert entry is not None
 
-    old = time.time() - 120
-    os.utime(entry, (old, old))
-    assert cache.get("k") is None
-    assert cache.sweep() == 1
+    _age(entry, 120)
+    assert store.get("k") is None
+    assert store.sweep() == 1
     assert not entry.exists()
 
 
-def test_hit_refreshes_ttl(tmp_path: Path, mediacache) -> None:
+def test_hit_refreshes_ttl(tmp_path: Path, cache) -> None:
     """命中会刷新时间，所以常看的作品不会过期。"""
-    cache = mediacache.MediaCache(
-        tmp_path / "media", ttl_seconds=60, max_bytes=0
-    )
-    entry = cache.store(["k"], _files(tmp_path, "a.jpg"))
-    old = time.time() - 50
-    os.utime(entry, (old, old))
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=60, max_bytes=0)
+    entry = store.store(["k"], _files(tmp_path, "a.jpg"))
+    assert entry is not None
+    _age(entry, 50)
 
-    assert cache.get("k") == entry
-    assert time.time() - entry.stat().st_mtime < 5
+    assert store.get("k") is not None
+    assert time.time() - _meta(entry)["updated_at"] < 5
 
 
-def test_capacity_evicts_oldest(tmp_path: Path, mediacache) -> None:
+def test_capacity_evicts_oldest(tmp_path: Path, cache) -> None:
     """超过容量上限时，最久没用过的先被删。"""
-    cache = mediacache.MediaCache(
+    store = cache.MediaCache(
         tmp_path / "media", ttl_seconds=3600, max_bytes=2500
     )
-    first = cache.store(["k1"], _files(tmp_path, "one.jpg", size=1000))
-    second = cache.store(["k2"], _files(tmp_path, "two.jpg", size=1000))
+    first = store.store(["k1"], _files(tmp_path, "one.jpg", size=1000))
+    second = store.store(["k2"], _files(tmp_path, "two.jpg", size=1000))
     assert first is not None and second is not None
 
-    # 把 first 的时间调旧，再加一个把总量顶过上限
-    old = time.time() - 100
-    os.utime(first, (old, old))
-    third = cache.store(["k3"], _files(tmp_path, "three.jpg", size=1000))
+    _age(first, 100)
+    third = store.store(["k3"], _files(tmp_path, "three.jpg", size=1000))
     assert third is not None
+    store.sweep()
     assert not first.exists(), "最久没用过的那个该被删"
     assert second.exists() and third.exists()
 
 
-def test_alias_key_points_to_same_files(tmp_path: Path, mediacache) -> None:
+def test_restore_replaces_stale_entry(tmp_path: Path, cache) -> None:
+    """过期条目重新缓存时整体替换：不会混进上一轮的文件。"""
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=60, max_bytes=0)
+    first = store.store(["k"], _files(tmp_path, "old.jpg"))
+    assert first is not None
+    _age(first, 120)
+    assert store.get("k") is None
+
+    second = store.store(["k"], _files(tmp_path, "new.jpg"))
+    assert second == first
+    names = sorted(item.name for item in store.media_files(second))
+    assert names == ["new.jpg"]
+
+
+def test_alias_key_points_to_same_files(tmp_path: Path, cache) -> None:
     """两个 key（短链 + 展开）指向同一份文件，容量只算一次。"""
-    cache = mediacache.MediaCache(
-        tmp_path / "media", ttl_seconds=3600, max_bytes=0
-    )
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
     files = _files(tmp_path, "a.jpg", size=2048)
-    primary = cache.store(["b23.tv_3xdwepo", "bilibili:bv1"], files)
+    primary = store.store(["b23.tv_3xdwepo", "bilibili:bv1"], files)
     assert primary is not None
 
-    alias = cache.get("bilibili:bv1")
+    alias = store.get("bilibili:bv1")
     assert alias is not None
-    # 别名是符号链接，路径不同但指向同一批文件
-    assert [item.name for item in mediacache.MediaCache.media_files(alias)] == [
-        item.name for item in mediacache.MediaCache.media_files(primary)
+    assert [item.name for item in alias.files] == [
+        item.name for item in store.media_files(primary)
     ]
-    assert mediacache.MediaCache.media_files(alias)[0].resolve() == (
-        mediacache.MediaCache.media_files(primary)[0].resolve()
-    )
-    # 别名不该被重复计算：总量就是主条目那份
+    assert alias.files[0].resolve() == store.media_files(primary)[0].resolve()
     only_primary = sum(
         item.stat().st_size for item in primary.rglob("*") if item.is_file()
     )
-    assert cache.total_bytes() == only_primary
-    # 条目要记下自己对应哪些 key，命中时好把它们一起记进去重
-    assert sorted(mediacache.MediaCache.entry_keys(primary)) == [
+    assert store.total_bytes() == only_primary
+    assert sorted(store.entry_keys(primary)) == [
         "b23.tv_3xdwepo",
         "bilibili:bv1",
     ]
 
 
-def test_broken_alias_is_cleaned(tmp_path: Path, mediacache) -> None:
+def test_remember_key_appends(tmp_path: Path, cache) -> None:
+    """命中时补记 key，方便把同一个作品的所有写法一起记进去重。"""
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
+    entry = store.store(["short"], _files(tmp_path, "a.jpg"))
+    assert entry is not None
+
+    store.remember_key(entry, "full")
+    assert sorted(store.entry_keys(entry)) == ["full", "short"]
+    # 重复补记不会写两遍
+    store.remember_key(entry, "full")
+    assert sorted(store.entry_keys(entry)) == ["full", "short"]
+
+
+def test_corrupt_meta_is_miss(tmp_path: Path, cache) -> None:
+    """meta 坏掉就当没有缓存，而不是抛异常。"""
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
+    entry = store.store(["k"], _files(tmp_path, "a.jpg"))
+    assert entry is not None
+    (entry / "meta.json").write_text("{not json", "utf-8")
+    assert store.get("k") is None
+
+
+def test_broken_alias_is_cleaned(tmp_path: Path, cache) -> None:
     """主条目被删掉后，别名符号链接会在 sweep 时清掉。"""
-    cache = mediacache.MediaCache(
-        tmp_path / "media", ttl_seconds=60, max_bytes=0
-    )
-    primary = cache.store(["short"], _files(tmp_path, "a.jpg"))
-    alias = cache.entry_dir("full")
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=60, max_bytes=0)
+    primary = store.store(["short"], _files(tmp_path, "a.jpg"))
+    assert primary is not None
+    alias = store.entry_dir("full")
     os.symlink(primary.name, alias)
 
-    old = time.time() - 120
-    os.utime(primary, (old, old))
-    cache.sweep()
+    _age(primary, 120)
+    store.sweep()
     assert not primary.exists()
     assert not alias.exists()

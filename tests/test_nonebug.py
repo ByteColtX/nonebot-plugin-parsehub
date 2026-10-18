@@ -25,7 +25,11 @@ class FakeParseResult:
 
 
 def _patch_parsehub(
-    core, monkeypatch, *, supported: bool = True, result=None
+    instance,
+    monkeypatch,
+    *,
+    supported: bool = True,
+    result=None,
 ) -> None:
     """把 ParseHub 的解析替换成假实现。"""
 
@@ -33,23 +37,23 @@ def _patch_parsehub(
         return result
 
     monkeypatch.setattr(
-        core.CLIENT,
+        instance.client,
         "is_supported",
         lambda url: asyncio.sleep(0, result=supported),
     )
-    monkeypatch.setattr(core.CLIENT, "parse", fake_parse)
+    monkeypatch.setattr(instance.client, "parse", fake_parse)
 
 
 @pytest.mark.asyncio
 async def test_auto_matcher_parses_group_link(
-    app: App, plugin, core, monkeypatch
+    app: App, plugin, monkeypatch, instance, matchers
 ):
-    _patch_parsehub(core, monkeypatch, result=FakeParseResult())
+    _patch_parsehub(instance, monkeypatch, result=FakeParseResult())
     event = make_group_event(
         "【好女孩刻猫猫】 https://b23.tv/ZlF8X92", message_id=1
     )
 
-    async with app.test_matcher(plugin.auto_matcher) as ctx:
+    async with app.test_matcher(matchers.auto) as ctx:
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
         )
@@ -73,12 +77,12 @@ async def test_auto_matcher_parses_group_link(
 
 @pytest.mark.asyncio
 async def test_auto_matcher_ignores_plain_message(
-    app: App, plugin, monkeypatch, core
+    app: App, plugin, monkeypatch, instance, matchers
 ):
-    _patch_parsehub(core, monkeypatch, result=FakeParseResult())
+    _patch_parsehub(instance, monkeypatch, result=FakeParseResult())
     event = make_group_event("今天天气不错", message_id=2)
 
-    async with app.test_matcher(plugin.auto_matcher) as ctx:
+    async with app.test_matcher(matchers.auto) as ctx:
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
         )
@@ -87,12 +91,14 @@ async def test_auto_matcher_ignores_plain_message(
 
 
 @pytest.mark.asyncio
-async def test_command_matcher_in_private(app: App, plugin, core, monkeypatch):
+async def test_command_matcher_in_private(
+    app: App, plugin, monkeypatch, instance, matchers
+):
     """私聊默认开，手动解析可用。"""
-    _patch_parsehub(core, monkeypatch, result=FakeParseResult())
+    _patch_parsehub(instance, monkeypatch, result=FakeParseResult())
     event = make_private_event("解析 https://b23.tv/abcd", message_id=3)
 
-    async with app.test_matcher(plugin.parse_cmd) as ctx:
+    async with app.test_matcher(matchers.parse) as ctx:
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
         )
@@ -115,12 +121,12 @@ async def test_command_matcher_in_private(app: App, plugin, core, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_unsupported_link_gives_feedback(
-    app: App, plugin, core, monkeypatch
+    app: App, plugin, monkeypatch, instance, media_mod, matchers
 ):
-    _patch_parsehub(core, monkeypatch, supported=False)
+    _patch_parsehub(instance, monkeypatch, supported=False)
     event = make_group_event("解析 https://b23.tv/abcd", message_id=4)
 
-    async with app.test_matcher(plugin.parse_cmd) as ctx:
+    async with app.test_matcher(matchers.parse) as ctx:
         bot = ctx.create_bot(
             base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
         )
@@ -130,12 +136,12 @@ async def test_unsupported_link_gives_feedback(
             {"message_id": 4, "emoji_id": plugin.REACT_START, "set": True},
             result=None,
         )
+        ctx.should_call_send(
+            event, Message("这个链接 ParseHub 不支持。"), result=None, bot=bot
+        )
         ctx.should_call_api(
             "set_msg_emoji_like",
             {"message_id": 4, "emoji_id": plugin.REACT_FAIL, "set": True},
             result=None,
-        )
-        ctx.should_call_send(
-            event, Message("这个链接 ParseHub 不支持。"), result=None, bot=bot
         )
         ctx.should_finished()

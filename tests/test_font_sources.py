@@ -29,14 +29,18 @@ class _FakeResponse:
 def _patch_stream(card, monkeypatch, payload: bytes, status: int = 200) -> None:
     """把 httpx.stream 换成返回固定内容的替身。"""
     monkeypatch.setattr(
-        card.httpx, "stream", lambda *_a, **_k: _FakeResponse(payload, status)
+        card.fonts.httpx,
+        "stream",
+        lambda *_a, **_k: _FakeResponse(payload, status),
     )
 
 
 def test_sources_are_pinned_and_hashed(card) -> None:
     """每个下载源都得钉到具体版本、带 sha256，不能跟分支走。"""
-    sources = list(card.FONT_SOURCES) + list(card.EMOJI_FONT_SOURCES)
-    for _name, fallback in card.FALLBACK_FONTS:
+    sources = list(card.fonts.FONT_SOURCES) + list(
+        card.fonts.EMOJI_FONT_SOURCES
+    )
+    for _name, fallback in card.fonts.FALLBACK_FONTS:
         sources += list(fallback)
     for source in sources:
         assert len(source.sha256) == 64, source.url
@@ -49,11 +53,11 @@ def test_matches_sources_detects_tampering(card, tmp_path: Path) -> None:
     good = tmp_path / "good.bin"
     good.write_bytes(b"hello")
     digest = hashlib.sha256(b"hello").hexdigest()
-    source = card.FontSource("https://example.test/good.bin", digest)
-    assert card._matches_sources(good, (source,))
+    source = card.fonts.FontSource("https://example.test/good.bin", digest)
+    assert card.fonts._matches_sources(good, (source,))
 
     good.write_bytes(b"hello!")
-    assert not card._matches_sources(good, (source,))
+    assert not card.fonts._matches_sources(good, (source,))
 
 
 def test_matches_sources_without_hash_is_permissive(
@@ -62,8 +66,10 @@ def test_matches_sources_without_hash_is_permissive(
     """没给 sha256（自定义地址）时不校验。"""
     path = tmp_path / "any.bin"
     path.write_bytes(b"whatever")
-    assert card._matches_sources(path, (card.FontSource("https://x/y", ""),))
-    assert card._matches_sources(path, ())
+    assert card.fonts._matches_sources(
+        path, (card.fonts.FontSource("https://x/y", ""),)
+    )
+    assert card.fonts._matches_sources(path, ())
 
 
 def test_fetch_font_keeps_matching_download(
@@ -74,8 +80,8 @@ def test_fetch_font_keeps_matching_download(
     digest = hashlib.sha256(payload).hexdigest()
     _patch_stream(card, monkeypatch, payload)
     target = tmp_path / "font.ttf"
-    source = card.FontSource("https://example.test/font.ttf", digest)
-    assert card._fetch_font(source, target, 200_000) is True
+    source = card.fonts.FontSource("https://example.test/font.ttf", digest)
+    assert card.fonts._fetch_font(source, target, 200_000) is True
     assert target.read_bytes() == payload
 
 
@@ -86,8 +92,8 @@ def test_fetch_font_drops_mismatched_download(
     payload = b"x" * 300_000
     _patch_stream(card, monkeypatch, payload)
     target = tmp_path / "font.ttf"
-    source = card.FontSource("https://example.test/font.ttf", "0" * 64)
-    assert card._fetch_font(source, target, 200_000) is False
+    source = card.fonts.FontSource("https://example.test/font.ttf", "0" * 64)
+    assert card.fonts._fetch_font(source, target, 200_000) is False
     assert not target.exists()
     assert not (tmp_path / "font.part").exists()
 
@@ -100,17 +106,17 @@ def test_fetch_font_rejects_truncated_download(
     digest = hashlib.sha256(payload).hexdigest()
     _patch_stream(card, monkeypatch, payload)
     target = tmp_path / "font.ttf"
-    source = card.FontSource("https://example.test/font.ttf", digest)
-    assert card._fetch_font(source, target, 200_000) is False
+    source = card.fonts.FontSource("https://example.test/font.ttf", digest)
+    assert card.fonts._fetch_font(source, target, 200_000) is False
     assert not target.exists()
 
 
 def test_ensure_font_drops_tampered_cache(card, tmp_path, monkeypatch) -> None:
     """缓存里的字体校验不过时删掉重下；下不到就宁可不给字体。"""
-    local = tmp_path / card.FONT_NAME
+    local = tmp_path / card.fonts.FONT_NAME
     local.write_bytes(b"tampered" + b"\x00" * 2_000_000)
-    monkeypatch.setattr(card, "_font_file", lambda: None)
-    monkeypatch.setattr(card, "_fetch_font", lambda *_a, **_k: False)
-    card._CUSTOM_FONT = None
-    assert card.ensure_font(tmp_path) is None
+    monkeypatch.setattr(card.fonts, "_font_file", lambda: None)
+    monkeypatch.setattr(card.fonts, "_fetch_font", lambda *_a, **_k: False)
+    card.fonts._CUSTOM_FONT = None
+    assert card.fonts.ensure_font(tmp_path) is None
     assert not local.exists()
