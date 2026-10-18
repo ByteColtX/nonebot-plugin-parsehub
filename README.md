@@ -186,4 +186,8 @@ ruff 强制 `pydocstyle(google)` + `pep8-naming` + `isort`。
 
 ## 📄 许可
 
-[MIT](LICENSE) · 解析能力来自 [ParseHub](https://github.com/z-mio/ParseHub)
+[MIT](LICENSE)
+
+## 🙏 致谢
+
+- [z-mio/ParseHub](https://github.com/z-mio/ParseHub)：本插件的解析能力全部来自这个项目
