@@ -76,6 +76,7 @@ REACT_FAIL = "5"  # 视频发送失败
 # 刷屏。超出部分直接不发，只发前 _MAX_MEDIA_ITEMS 个。
 _MAX_MEDIA_ITEMS = 20
 
+
 # 合并转发里显示的节点名取自 NICKNAME 的第一项。
 # nonebot 把 NICKNAME 解析成 set，顺序会丢，所以这里读原始配置值，保证显示稳定
 # （否则每次重启昵称都可能变），读不到才退回配置集合里的第一个。

@@ -214,7 +214,9 @@ def test_render_without_font_raises(tmp_path: Path, card) -> None:
         card.set_font(FONT)
 
 
-def test_ensure_font_prefers_local_file(tmp_path: Path, card, monkeypatch) -> None:
+def test_ensure_font_prefers_local_file(
+    tmp_path: Path, card, monkeypatch
+) -> None:
     """缓存目录里已有字体、且 sha256 对得上时不再下载。"""
     local = tmp_path / card.FONT_NAME
     payload = FONT.read_bytes() + b"\0" * 1_000_000

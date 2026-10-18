@@ -626,11 +626,12 @@ def test_short_error_strips_nested_prefixes(plugin):
 def test_short_error_flattens_fallback_error(plugin):
     """2.3.10 的「所有解析方式均失败」是多行，QQ 里只能发一句话。"""
     exc = RuntimeError(
-        "所有解析方式均失败:\n"
-        "- 网页解析: HTTP错误: 403\n"
-        "- 移动端: 作品不可用"
+        "所有解析方式均失败:\n- 网页解析: HTTP错误: 403\n- 移动端: 作品不可用"
     )
-    assert plugin._short_error(exc) == "所有解析方式均失败（网页解析: HTTP错误: 403）"
+    assert (
+        plugin._short_error(exc)
+        == "所有解析方式均失败（网页解析: HTTP错误: 403）"
+    )
     # 超长的也要截断，别在气泡里刷一屏
     long = RuntimeError("解析失败：" + "很长的原因" * 40)
     assert len(plugin._short_error(long)) == plugin._ERROR_MAX_CHARS
@@ -667,9 +668,12 @@ async def test_download_uses_concurrency(core, tmp_media, monkeypatch):
         client, "hub", lambda: asyncio.sleep(0, result=FakeHub())
     )
 
-    assert await core.ParseHubClient.download_parsed(
-        client, FakeResult(), str(tmp_media)
-    ) == "parsed-ok"
+    assert (
+        await core.ParseHubClient.download_parsed(
+            client, FakeResult(), str(tmp_media)
+        )
+        == "parsed-ok"
+    )
     assert seen["concurrency"] == core.DOWNLOAD_CONCURRENCY > 1
 
     seen.clear()

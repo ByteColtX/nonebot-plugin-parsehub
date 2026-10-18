@@ -36,6 +36,7 @@ ASSET_DIR = Path(__file__).resolve().parent / "assets" / "logos"
 # 报告 12，cv2 量出 30fps × 366 帧 = 12.20s，早先当毫秒会显示成 00:00）。
 _MS_PLATFORMS = frozenset({"douyin", "xhs"})
 
+
 @dataclass(frozen=True)
 class FontSource:
     """一个字体下载源。
@@ -177,6 +178,7 @@ def _fetch_font(
             tmp.unlink(missing_ok=True)
     logger.info(f"[parsehub] 字体已下载并校验 {target}")
     return True
+
 
 # 平台 → (展示名, 品牌色, logo 文件名)
 # key 用 parsehub 的 platform.id（xhs/coolapk/… 都是它的原始 id）。
@@ -326,11 +328,25 @@ EMOJI_DROP = 0.06
 
 # 算作 emoji 的码点区间（含 ZWJ、变体符、区域指示符，组合序列不会被切开）。
 _EMOJI_RANGES: tuple[tuple[int, int], ...] = (
-    (0x1F000, 0x1FAFF), (0x1F1E6, 0x1F1FF), (0x2600, 0x27BF), (0x2300, 0x23FF),
-    (0x25A0, 0x25FF), (0x2B00, 0x2BFF), (0x2190, 0x21FF), (0x200D, 0x200D),
-    (0xFE00, 0xFE0F), (0x20E3, 0x20E3), (0x203C, 0x203C), (0x2049, 0x2049),
-    (0x2122, 0x2122), (0x2139, 0x2139), (0x24C2, 0x24C2), (0x3030, 0x3030),
-    (0x303D, 0x303D), (0x3297, 0x3297), (0x3299, 0x3299),
+    (0x1F000, 0x1FAFF),
+    (0x1F1E6, 0x1F1FF),
+    (0x2600, 0x27BF),
+    (0x2300, 0x23FF),
+    (0x25A0, 0x25FF),
+    (0x2B00, 0x2BFF),
+    (0x2190, 0x21FF),
+    (0x200D, 0x200D),
+    (0xFE00, 0xFE0F),
+    (0x20E3, 0x20E3),
+    (0x203C, 0x203C),
+    (0x2049, 0x2049),
+    (0x2122, 0x2122),
+    (0x2139, 0x2139),
+    (0x24C2, 0x24C2),
+    (0x3030, 0x3030),
+    (0x303D, 0x303D),
+    (0x3297, 0x3297),
+    (0x3299, 0x3299),
 )
 
 _EMOJI_FONT: Path | None = None
@@ -717,12 +733,14 @@ def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int, float]:  # noqa: 
     ascent, descent = font.getmetrics()
     baseline = ascent + 2
     width = max(1, int(round(font.getlength(chunk))))
-    canvas = Image.new(
-        "RGBA", (width + 8, ascent + descent + 8), (0, 0, 0, 0)
-    )
+    canvas = Image.new("RGBA", (width + 8, ascent + descent + 8), (0, 0, 0, 0))
     ImageDraw.Draw(canvas).text(
-        (0, baseline), chunk, font=font, fill=(255, 255, 255),
-        anchor="ls", embedded_color=True,
+        (0, baseline),
+        chunk,
+        font=font,
+        fill=(255, 255, 255),
+        anchor="ls",
+        embedded_color=True,
     )
     box = canvas.getbbox()
     if box is None:
@@ -732,8 +750,12 @@ def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int, float]:  # noqa: 
             "RGBA", (width + int(pad) + 8, ascent + descent + 8), (0, 0, 0, 0)
         )
         ImageDraw.Draw(canvas).text(
-            (-pad, baseline), " " + chunk, font=font, fill=(255, 255, 255),
-            anchor="ls", embedded_color=True,
+            (-pad, baseline),
+            " " + chunk,
+            font=font,
+            fill=(255, 255, 255),
+            anchor="ls",
+            embedded_color=True,
         )
         box = canvas.getbbox()
         if box is None:
@@ -1446,11 +1468,23 @@ def render(
         emoji_size=KICKER_SIZE,
     )
     for line in title_lines:
-        draw_text(draw, (INSET, y), line, title_font, (255, 255, 255),
-                  emoji_size=TITLE_SIZE)
+        draw_text(
+            draw,
+            (INSET, y),
+            line,
+            title_font,
+            (255, 255, 255),
+            emoji_size=TITLE_SIZE,
+        )
         y += 70
-    draw_text(draw, (INSET, y + 8), meta, meta_font, (214, 214, 222),
-              emoji_size=META_SIZE)
+    draw_text(
+        draw,
+        (INSET, y + 8),
+        meta,
+        meta_font,
+        (214, 214, 222),
+        emoji_size=META_SIZE,
+    )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.convert("RGB").save(out_path, "JPEG", quality=92)

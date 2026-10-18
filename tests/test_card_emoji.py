@@ -16,7 +16,9 @@ from PIL import Image, ImageDraw
 
 # 本机手动放一份 emoji 字体时，这个用例会真的跑起来；CI 上跳过。
 _EMOJI_FONT_HINT = Path(
-    os.environ.get("PARSEHUB_EMOJI_FONT", "~/.cache/nonebot2/parsehub/emoji-test.ttf")
+    os.environ.get(
+        "PARSEHUB_EMOJI_FONT", "~/.cache/nonebot2/parsehub/emoji-test.ttf"
+    )
 ).expanduser()
 
 
@@ -59,7 +61,8 @@ def test_draw_text_without_emoji_font(card) -> None:
 
 
 @pytest.mark.skipif(
-    not _EMOJI_FONT_HINT.exists(), reason="本地没有 emoji 字体（部署时会自动下载）"
+    not _EMOJI_FONT_HINT.exists(),
+    reason="本地没有 emoji 字体（部署时会自动下载）",
 )
 def test_emoji_tile_scales_bitmap_strike(card) -> None:
     """位图字体只有固定档位，贴图必须缩到「字号 × 比例」。"""
@@ -81,7 +84,8 @@ def test_emoji_tile_scales_bitmap_strike(card) -> None:
 
 
 @pytest.mark.skipif(
-    not _EMOJI_FONT_HINT.exists(), reason="本地没有 emoji 字体（部署时会自动下载）"
+    not _EMOJI_FONT_HINT.exists(),
+    reason="本地没有 emoji 字体（部署时会自动下载）",
 )
 def test_emoji_tile_is_colored(card) -> None:
     """emoji 贴图必须真的带上颜色，而不是空白。"""
@@ -108,7 +112,9 @@ def test_emoji_tile_is_colored(card) -> None:
     assert colorful > 50, f"贴图里彩色像素太少（{colorful}）"
 
 
-def test_ensure_emoji_font_caches_existing_file(card, tmp_path, monkeypatch) -> None:
+def test_ensure_emoji_font_caches_existing_file(
+    card, tmp_path, monkeypatch
+) -> None:
     """缓存目录里已经有字体、且 sha256 对得上时直接用，不联网。"""
     import hashlib
 

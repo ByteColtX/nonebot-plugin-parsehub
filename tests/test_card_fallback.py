@@ -14,7 +14,9 @@ import pytest
 class _StubFont:
     """够用的字体替身。"""
 
-    def __init__(self, name: str, size: int = 40, advance: float = 10.0) -> None:
+    def __init__(
+        self, name: str, size: int = 40, advance: float = 10.0
+    ) -> None:
         self.name = name
         self.size = size
         self.advance = advance
@@ -85,7 +87,9 @@ def test_font_runs_without_fallbacks_stays_main(card, monkeypatch) -> None:
     assert card._font_runs("⚈", main) == [("⚈", main)]
 
 
-def test_font_runs_emoji_font_without_glyph_falls_back(card, monkeypatch) -> None:
+def test_font_runs_emoji_font_without_glyph_falls_back(
+    card, monkeypatch
+) -> None:
     """被当成 emoji 但 emoji 字体里没有的字，要落到回退字体上，不能直接消失。"""
     main = _StubFont("main")
     fb = _StubFont("fb")
@@ -125,7 +129,9 @@ def test_advance_uses_the_font_that_draws(card, chain) -> None:
     assert card._advance("汉˶汉", main) == 24.0
 
 
-def test_ensure_fallback_fonts_skips_failed_download(card, tmp_path, monkeypatch) -> None:
+def test_ensure_fallback_fonts_skips_failed_download(
+    card, tmp_path, monkeypatch
+) -> None:
     """回退字体下不到就当它不存在，不影响出卡。"""
     monkeypatch.setattr(card, "_FALLBACK_FILES", [])
     monkeypatch.setattr(card, "_fetch_font", lambda *_a, **_k: False)
@@ -133,7 +139,9 @@ def test_ensure_fallback_fonts_skips_failed_download(card, tmp_path, monkeypatch
     assert card._FALLBACK_FILES == []
 
 
-def test_ensure_fallback_fonts_accepts_verified_cache(card, tmp_path, monkeypatch) -> None:
+def test_ensure_fallback_fonts_accepts_verified_cache(
+    card, tmp_path, monkeypatch
+) -> None:
     """缓存里已有且 sha256 对得上时不再下载。"""
     payload = b"f" * 200_000
     digest = card.hashlib.sha256(payload).hexdigest()
@@ -146,12 +154,16 @@ def test_ensure_fallback_fonts_accepts_verified_cache(card, tmp_path, monkeypatc
         ((name, (card.FontSource("https://example.test/stub.ttf", digest),)),),
     )
     called = []
-    monkeypatch.setattr(card, "_fetch_font", lambda *_a, **_k: called.append(1) or True)
+    monkeypatch.setattr(
+        card, "_fetch_font", lambda *_a, **_k: called.append(1) or True
+    )
     assert card.ensure_fallback_fonts(tmp_path) == [local]
     assert called == [], "校验通过就不该再下载"
 
 
-def test_ensure_fallback_fonts_drops_tampered_cache(card, tmp_path, monkeypatch) -> None:
+def test_ensure_fallback_fonts_drops_tampered_cache(
+    card, tmp_path, monkeypatch
+) -> None:
     """缓存里的回退字体被改过就删掉重下。"""
     monkeypatch.setattr(card, "_FALLBACK_FILES", [])
     name = "Stub.ttf"
@@ -160,7 +172,12 @@ def test_ensure_fallback_fonts_drops_tampered_cache(card, tmp_path, monkeypatch)
     monkeypatch.setattr(
         card,
         "FALLBACK_FONTS",
-        ((name, (card.FontSource("https://example.test/stub.ttf", "0" * 64),)),),
+        (
+            (
+                name,
+                (card.FontSource("https://example.test/stub.ttf", "0" * 64),),
+            ),
+        ),
     )
     monkeypatch.setattr(card, "_fetch_font", lambda *_a, **_k: False)
     assert card.ensure_fallback_fonts(tmp_path) == []

@@ -56,7 +56,9 @@ def test_matches_sources_detects_tampering(card, tmp_path: Path) -> None:
     assert not card._matches_sources(good, (source,))
 
 
-def test_matches_sources_without_hash_is_permissive(card, tmp_path: Path) -> None:
+def test_matches_sources_without_hash_is_permissive(
+    card, tmp_path: Path
+) -> None:
     """没给 sha256（自定义地址）时不校验。"""
     path = tmp_path / "any.bin"
     path.write_bytes(b"whatever")
@@ -64,7 +66,9 @@ def test_matches_sources_without_hash_is_permissive(card, tmp_path: Path) -> Non
     assert card._matches_sources(path, ())
 
 
-def test_fetch_font_keeps_matching_download(card, tmp_path, monkeypatch) -> None:
+def test_fetch_font_keeps_matching_download(
+    card, tmp_path, monkeypatch
+) -> None:
     """sha256 对得上才落盘。"""
     payload = b"x" * 300_000
     digest = hashlib.sha256(payload).hexdigest()
@@ -75,7 +79,9 @@ def test_fetch_font_keeps_matching_download(card, tmp_path, monkeypatch) -> None
     assert target.read_bytes() == payload
 
 
-def test_fetch_font_drops_mismatched_download(card, tmp_path, monkeypatch) -> None:
+def test_fetch_font_drops_mismatched_download(
+    card, tmp_path, monkeypatch
+) -> None:
     """sha256 对不上：不落盘、不留 .part。"""
     payload = b"x" * 300_000
     _patch_stream(card, monkeypatch, payload)
@@ -86,7 +92,9 @@ def test_fetch_font_drops_mismatched_download(card, tmp_path, monkeypatch) -> No
     assert not (tmp_path / "font.part").exists()
 
 
-def test_fetch_font_rejects_truncated_download(card, tmp_path, monkeypatch) -> None:
+def test_fetch_font_rejects_truncated_download(
+    card, tmp_path, monkeypatch
+) -> None:
     """下了一半的文件不算数。"""
     payload = b"x" * 100
     digest = hashlib.sha256(payload).hexdigest()
