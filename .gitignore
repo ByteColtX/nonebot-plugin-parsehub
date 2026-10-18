@@ -15,3 +15,8 @@ coverage.xml
 
 # 测试时 LOCALSTORE_USE_CWD=true 会在这里落文件
 cache/
+data/
+
+# 编辑器 / 工具产物
+.DS_Store
+.thinkrail/
