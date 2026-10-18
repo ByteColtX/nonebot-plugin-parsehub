@@ -24,7 +24,7 @@ _EMOJI_FONT_HINT = Path(
 
 def test_split_emoji_keeps_zwj_sequence(card) -> None:
     """组合序列（ZWJ、变体符、区域指示符）不能被切开。"""
-    chunks = card._split_emoji("猫猫🐱和👨‍👩‍👧还有🇨🇳")
+    chunks = card.layout._split_emoji("猫猫🐱和👨‍👩‍👧还有🇨🇳")
     emoji = [text for text, is_emoji in chunks if is_emoji]
     plain = [text for text, is_emoji in chunks if not is_emoji]
     assert "🐱" in emoji
@@ -35,26 +35,26 @@ def test_split_emoji_keeps_zwj_sequence(card) -> None:
 
 def test_is_emoji_char(card) -> None:
     """常见 emoji 判定，以及中英文不会被误判。"""
-    assert card._is_emoji_char("🍧")
-    assert card._is_emoji_char("✨")
-    assert not card._is_emoji_char("猫")
-    assert not card._is_emoji_char("A")
-    assert not card._is_emoji_char("#")
+    assert card.layout._is_emoji_char("🍧")
+    assert card.layout._is_emoji_char("✨")
+    assert not card.layout._is_emoji_char("猫")
+    assert not card.layout._is_emoji_char("A")
+    assert not card.layout._is_emoji_char("#")
 
 
 def test_draw_text_without_emoji_font(card) -> None:
     """没有 emoji 字体时退化成普通绘制，不抛异常。"""
-    card._EMOJI_FONT = None
-    card._emoji_font_file.cache_clear()
-    card._emoji_strike_font.cache_clear()
-    card._emoji_tile.cache_clear()
+    card.fonts._EMOJI_FONT = None
+    card.fonts._emoji_font_file.cache_clear()
+    card.fonts._emoji_strike_font.cache_clear()
+    card.layout._emoji_tile.cache_clear()
     canvas = Image.new("RGB", (400, 80), (20, 20, 20))
     draw = ImageDraw.Draw(canvas)
-    card.draw_text(
+    card.layout.draw_text(
         draw,
         (10, 10),
         "猫猫🐱",
-        card._font(28, 400),
+        card.fonts._font(28, 400),
         (255, 255, 255),
         emoji_size=28,
     )
@@ -66,20 +66,20 @@ def test_draw_text_without_emoji_font(card) -> None:
 )
 def test_emoji_tile_scales_bitmap_strike(card) -> None:
     """位图字体只有固定档位，贴图必须缩到「字号 × 比例」。"""
-    card._EMOJI_FONT = _EMOJI_FONT_HINT
-    card._emoji_font_file.cache_clear()
-    card._emoji_strike_font.cache_clear()
-    card._emoji_tile.cache_clear()
+    card.fonts._EMOJI_FONT = _EMOJI_FONT_HINT
+    card.fonts._emoji_font_file.cache_clear()
+    card.fonts._emoji_strike_font.cache_clear()
+    card.layout._emoji_tile.cache_clear()
     try:
-        tile = card._emoji_tile("🍧", 58)
+        tile = card.layout._emoji_tile("🍧", 58)
     finally:
-        card._EMOJI_FONT = None
-        card._emoji_font_file.cache_clear()
-        card._emoji_strike_font.cache_clear()
-        card._emoji_tile.cache_clear()
+        card.fonts._EMOJI_FONT = None
+        card.fonts._emoji_font_file.cache_clear()
+        card.fonts._emoji_strike_font.cache_clear()
+        card.layout._emoji_tile.cache_clear()
     assert tile, "贴图不该为空"
     image = tile[0]
-    assert image.height == round(58 * card.EMOJI_RATIO), "没缩到目标高度"
+    assert image.height == round(58 * card.layout.EMOJI_RATIO), "没缩到目标高度"
     assert image.width > 0
 
 
@@ -89,17 +89,17 @@ def test_emoji_tile_scales_bitmap_strike(card) -> None:
 )
 def test_emoji_tile_is_colored(card) -> None:
     """emoji 贴图必须真的带上颜色，而不是空白。"""
-    card._EMOJI_FONT = _EMOJI_FONT_HINT
-    card._emoji_font_file.cache_clear()
-    card._emoji_strike_font.cache_clear()
-    card._emoji_tile.cache_clear()
+    card.fonts._EMOJI_FONT = _EMOJI_FONT_HINT
+    card.fonts._emoji_font_file.cache_clear()
+    card.fonts._emoji_strike_font.cache_clear()
+    card.layout._emoji_tile.cache_clear()
     try:
-        tile = card._emoji_tile("🍧", 32)
+        tile = card.layout._emoji_tile("🍧", 32)
     finally:
-        card._EMOJI_FONT = None
-        card._emoji_font_file.cache_clear()
-        card._emoji_strike_font.cache_clear()
-        card._emoji_tile.cache_clear()
+        card.fonts._EMOJI_FONT = None
+        card.fonts._emoji_font_file.cache_clear()
+        card.fonts._emoji_strike_font.cache_clear()
+        card.layout._emoji_tile.cache_clear()
     assert tile, "贴图不该为空"
     image = tile[0]
     pixels = image.convert("RGB").load()
@@ -119,20 +119,20 @@ def test_ensure_emoji_font_caches_existing_file(
     import hashlib
 
     payload = b"\x00" * 300_000
-    font = tmp_path / card.EMOJI_FONT_NAME
+    font = tmp_path / card.fonts.EMOJI_FONT_NAME
     font.write_bytes(payload)
     monkeypatch.setattr(
-        card,
+        card.fonts,
         "EMOJI_FONT_SOURCES",
         (
-            card.FontSource(
+            card.fonts.FontSource(
                 "https://example.test/Twemoji.Mozilla.ttf",
                 hashlib.sha256(payload).hexdigest(),
             ),
         ),
     )
-    card._EMOJI_FONT = None
-    card._emoji_font_file.cache_clear()
-    assert card.ensure_emoji_font(tmp_path) == font
-    card._EMOJI_FONT = None
-    card._emoji_font_file.cache_clear()
+    card.fonts._EMOJI_FONT = None
+    card.fonts._emoji_font_file.cache_clear()
+    assert card.fonts.ensure_emoji_font(tmp_path) == font
+    card.fonts._EMOJI_FONT = None
+    card.fonts._emoji_font_file.cache_clear()

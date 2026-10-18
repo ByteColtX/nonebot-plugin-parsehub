@@ -61,7 +61,7 @@ def test_every_platform_logo_exists(card) -> None:
         {
             logo
             for _, _, logo in card.PLATFORMS.values()
-            if not (card.ASSET_DIR / f"{logo}.png").exists()
+            if not (card.layout.ASSET_DIR / f"{logo}.png").exists()
         }
     )
     assert not missing, f"缺少 logo 文件：{missing}"
@@ -70,23 +70,23 @@ def test_every_platform_logo_exists(card) -> None:
 def test_platform_logo_is_loadable(card) -> None:
     """每个平台表里的 logo 都要能按尺寸画出来（防尺寸为 0 / 坏文件）。"""
     for platform_id, (_, _, logo) in card.PLATFORMS.items():
-        image = card._logo(platform_id, 54)
+        image = card.layout._logo(platform_id, 54)
         assert image.width > 0 and image.height == 54, (
             f"{platform_id} → {logo} 画不出来"
         )
 
 
 @pytest.mark.parametrize("host", SHORT_LINK_HOSTS)
-def test_short_link_host_is_allowed(core, host: str) -> None:
+def test_short_link_host_is_allowed(host: str, keys) -> None:
     """上游支持的短链域名必须能过预筛白名单。"""
-    assert core._host_allowed(host), f"{host} 不在白名单里"
-    assert core._host_allowed(f"www.{host}"), f"{host} 的子域名没被放行"
+    assert keys.host_allowed(host), f"{host} 不在白名单里"
+    assert keys.host_allowed(f"www.{host}"), f"{host} 的子域名没被放行"
 
 
-def test_extract_urls_keeps_xhslink_cn(core) -> None:
+def test_extract_urls_keeps_xhslink_cn(keys) -> None:
     """小红书分享文案里的 xhslink.cn 链接要能被抓出来。"""
     text = "不负圣女之名 https://xhslink.cn/o/7mQiQjVqUtO \n【小红书】里有答案，快去围观~"
-    assert core.extract_urls(text) == ["https://xhslink.cn/o/7mQiQjVqUtO"]
+    assert keys.extract_urls(text) == ["https://xhslink.cn/o/7mQiQjVqUtO"]
 
 
 def test_xhs_platform_maps_to_xiaohongshu_logo(card) -> None:
@@ -98,13 +98,13 @@ def test_xhs_platform_maps_to_xiaohongshu_logo(card) -> None:
     class _Result:
         platform = _Platform()
 
-    name, _, logo = card.platform_of(_Result())
+    name, _, logo = card.layout.platform_of(_Result())
     assert name == "小红书"
     assert logo == "xiaohongshu"
 
 
-def test_xhs_duration_is_milliseconds(card) -> None:
+def test_xhs_duration_is_milliseconds(card, plugin) -> None:
     """小红书给的 duration 是毫秒：实测 7967 对应真视频 7.97 秒。"""
-    assert "xhs" in card._MS_PLATFORMS
-    assert card.format_duration(7967, is_ms=True) == "00:07"
-    assert card.format_duration(7967) == "2:12:47"  # 不换算就会成这样
+    assert "xhs" in plugin.platforms.MS_PLATFORMS
+    assert card.layout.format_duration(7967, is_ms=True) == "00:07"
+    assert card.layout.format_duration(7967) == "2:12:47"  # 不换算就会成这样

@@ -1,7 +1,12 @@
-"""测试环境初始化：注册 OneBot v11 适配器，按 pyproject.toml 加载插件。"""
+"""测试环境初始化：注册 OneBot v11 适配器，按 pyproject.toml 加载插件。
+
+每个测试拿到一个独立的 ``App``（临时缓存 / 中转 / 数据目录 + 假下载），不再
+monkeypatch 模块全局。
+"""
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from pathlib import Path
 
@@ -27,7 +32,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 async def after_nonebot_init(after_nonebot_init: None) -> None:  # noqa: PT004
-    """nonebug 初始化完成后：注册适配器 + 加载本插件。"""
+    """nonebot 初始化完成后：注册适配器 + 加载本插件。"""
     driver = nonebot.get_driver()
     driver.register_adapter(OnebotV11Adapter)
     nonebot.load_from_toml("pyproject.toml")
@@ -35,68 +40,127 @@ async def after_nonebot_init(after_nonebot_init: None) -> None:  # noqa: PT004
 
 @pytest.fixture(scope="session")
 def plugin():
-    """被加载的插件模块对象（用于 monkeypatch 插件内的名字）。"""
+    """被加载的插件模块对象。"""
     loaded = nonebot.get_plugin("nonebot_plugin_parsehub")
     assert loaded is not None, "插件加载失败"
     return loaded.module
 
 
 @pytest.fixture(scope="session")
-def core(plugin):
-    """插件的 core 子模块（延迟导入，此时 nonebot 已初始化）。"""
-    return plugin.core
-
-
-@pytest.fixture(scope="session")
-def server(plugin):
-    """插件的 server 子模块。"""
-    return plugin.server
+def config_mod(plugin):
+    """配置类。"""
+    return plugin.Config
 
 
 @pytest.fixture(scope="session")
 def card(plugin):
-    """插件的 card 子模块（必须在 nonebot 初始化之后才 import）。"""
+    """卡片包。"""
     return plugin.card
 
 
 @pytest.fixture(scope="session")
-def switches(plugin):
-    """插件的 switches 子模块（同样要等 nonebot 初始化）。"""
-    return plugin.switches
+def cache(plugin):
+    """缓存模块。"""
+    return plugin.cache
 
 
 @pytest.fixture(scope="session")
-def mediacache(plugin):
-    """插件的 mediacache 子模块。"""
-    return plugin.mediacache
+def service(plugin):
+    """编排模块。"""
+    return plugin.service
 
 
-@pytest.fixture(autouse=True)
-def _clean_media_cache(plugin, monkeypatch, tmp_path):
-    """每个测试一份独立的媒体缓存，别写进仓库目录、也别互相命中。"""
-    monkeypatch.setattr(
-        plugin,
-        "MEDIA_CACHE",
-        plugin.mediacache.MediaCache(
-            tmp_path / "media", ttl_seconds=24 * 3600, max_bytes=1024**3
-        ),
+@pytest.fixture(scope="session")
+def triggers(plugin):
+    """触发层模块。"""
+    return plugin.triggers
+
+
+@pytest.fixture(scope="session")
+def delivery(plugin):
+    """投递模块。"""
+    return plugin.delivery
+
+
+@pytest.fixture(scope="session")
+def feedback(plugin):
+    """反馈模块。"""
+    return plugin.feedback
+
+
+@pytest.fixture(scope="session")
+def keys(plugin):
+    """链接识别模块。"""
+    return plugin.keys
+
+
+@pytest.fixture(scope="session")
+def errors(plugin):
+    """错误分类模块。"""
+    return plugin.errors
+
+
+@pytest.fixture(scope="session")
+def media_mod(plugin):
+    """媒体模块。"""
+    return plugin.media
+
+
+@pytest.fixture(scope="session")
+def platforms(plugin):
+    """平台元数据模块。"""
+    return plugin.platforms
+
+
+@pytest.fixture(scope="session")
+def parsehub_client(plugin):
+    """ParseHub 客户端模块。"""
+    return plugin.parsehub_client
+
+
+@pytest.fixture(scope="session")
+def switches(plugin):
+    """会话开关模块。"""
+    return plugin.switches
+
+
+@pytest.fixture()
+def instance(plugin, tmp_path, monkeypatch):
+    """每个测试一个独立实例：临时目录 + 假下载。"""
+    settings = plugin.Settings.from_config(plugin.Config())
+    instance = plugin.App.build(
+        settings,
+        cache_dir=tmp_path / "cache",
+        relay_root=tmp_path / "relay",
+        data_dir=tmp_path / "data",
     )
 
+    async def delegate(result, path, proxy="", cookie=""):
+        return await instance.client.download("<parsed>", path, proxy, cookie)
 
-@pytest.fixture(autouse=True)
-def _clean_dedupe(plugin, monkeypatch):
-    """每个测试用一份干净的去重缓存，免得用例之间互相跳过。"""
-    monkeypatch.setattr(plugin, "DEDUPE", plugin.core.DedupeCache())
+    # 测试用的 FakeParseResult 没有 download_sync；委托给 download 之后，
+    # 只 patch CLIENT.download 的用例仍然覆盖首次下载这条路。
+    monkeypatch.setattr(instance.client, "download_parsed", delegate)
+    return instance
 
 
-@pytest.fixture(autouse=True)
-def _clean_switches(plugin, monkeypatch, tmp_path):
-    """每个测试用一份独立的解析开关，避免用例之间互相影响。"""
-    monkeypatch.setattr(
-        plugin,
-        "SWITCHES",
-        plugin.switches.SwitchStore(tmp_path / "sessions.json"),
-    )
+@pytest.fixture()
+def update_settings(instance, monkeypatch):
+    """改一项设置（Settings 是 frozen，整体替换）。"""
+
+    def _update(**changes):
+        settings = dataclasses.replace(instance.settings, **changes)
+        monkeypatch.setattr(instance, "settings", settings)
+        # Delivery 持有设置引用，一起换掉
+        monkeypatch.setattr(instance.delivery, "settings", settings)
+
+    return _update
+
+
+@pytest.fixture()
+def matchers(instance, triggers):
+    """按当前实例注册一套 matcher（测试用）。"""
+    return triggers.create_matchers(instance)
 
 
 @pytest.fixture(autouse=True)
@@ -104,22 +168,11 @@ def _offline_card(card, monkeypatch):
     """卡片模块在测试里一律不联网。
 
     字体换成仓库里的子集，封面一律当作取不到（否则会真去请求封面 CDN）。
-    需要真出卡的测试自己再 monkeypatch ``card.render`` / ``card.fetch_cover``。
+    需要真出卡的测试自己再 monkeypatch ``card.layout.render`` /
+    ``card.cover.fetch_cover``。
     """
-    card.set_font(TEST_FONT)
-    monkeypatch.setattr(card, "fetch_cover", lambda *a, **kw: None)
-
-
-@pytest.fixture(autouse=True)
-def _parsed_download_delegates(core, monkeypatch):
-    """把「用已解析结果下载」委托给用例里 patch 的 ``CLIENT.download``。
-
-    真实实现走 ``result.download_sync(...)``（省掉库内部那次重复解析），但测试用的
-    ``FakeParseResult`` 没有这个方法；委托之后，原有那些只 patch ``CLIENT.download``
-    的用例仍然覆盖首次下载这条路。专门验证两条路径的用例自己再 patch 它。
-    """
-
-    async def delegate(result, path, proxy="", cookie=""):
-        return await core.CLIENT.download("<parsed>", path, proxy, cookie)
-
-    monkeypatch.setattr(core.CLIENT, "download_parsed", delegate)
+    card.fonts.set_font(TEST_FONT)
+    monkeypatch.setattr(card.cover, "fetch_cover", lambda *a, **kw: None)
+    # 测试绝不联网：emoji / 回退字体没有下载源，直接跳过
+    monkeypatch.setattr(card.fonts, "EMOJI_FONT_SOURCES", ())
+    monkeypatch.setattr(card.fonts, "FALLBACK_FONTS", ())

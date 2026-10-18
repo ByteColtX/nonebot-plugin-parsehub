@@ -27,22 +27,29 @@ class RecordingBot(Bot):
 
 
 @pytest.fixture()
-def tmp_media(tmp_path, monkeypatch, plugin, server):
+def tmp_media(tmp_path, monkeypatch, plugin, instance):
     """把中转服务的根目录指到临时目录。"""
-    monkeypatch.setattr(server.RELAY, "root", tmp_path)
-    monkeypatch.setattr(plugin._ENDPOINT, "host", "127.0.0.1")
-    monkeypatch.setattr(plugin._ENDPOINT, "port", 18899)
+    monkeypatch.setattr(instance.relay, "root", tmp_path)
+    monkeypatch.setattr(instance.endpoint, "host", "127.0.0.1")
+    monkeypatch.setattr(instance.endpoint, "port", 18899)
     return tmp_path
 
 
 @pytest.fixture()
-def upload_mode(plugin, monkeypatch):
+def upload_mode(plugin, monkeypatch, instance, update_settings):
     """把上传模式切到指定值。"""
 
     def _set(mode: str) -> None:
-        monkeypatch.setattr(plugin.plugin_config, "parsehub_upload_mode", mode)
+        update_settings(delivery_mode=mode)
 
     return _set
+
+
+def _as_media(path: Path):
+    """把本地路径包成带类型的媒体。"""
+    from nonebot_plugin_parsehub import media
+
+    return media.MediaFile(path=path, kind=media.kind_of(path))
 
 
 def _expected_ref(path: Path, mode: str) -> str:
@@ -63,14 +70,14 @@ def _sent_segments(bot: RecordingBot, api: str = "send_msg") -> list:
     ]
 
 
-def test_default_upload_mode_is_file(plugin):
+def test_default_upload_mode_is_file(plugin, config_mod):
     """默认值就是 file：同机部署零配置即可用，不占端口。"""
-    assert plugin.Config().parsehub_upload_mode == "file"
+    assert config_mod().parsehub_delivery == "file"
 
 
 @pytest.mark.asyncio
 async def test_media_ref_http_mode_points_at_relay(
-    plugin, tmp_media, upload_mode
+    plugin, tmp_media, upload_mode, instance
 ):
     """http 模式仍然给协议端中转地址。"""
     upload_mode("http")
@@ -79,13 +86,15 @@ async def test_media_ref_http_mode_points_at_relay(
     media = sub / "a.jpg"
     media.write_bytes(b"hello")
 
-    ref = await plugin._media_ref(media)
+    ref = await instance.delivery.ref(media)
     assert ref == "http://127.0.0.1:18899/abc123/a.jpg"
 
 
 @pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_media_ref_follows_mode(plugin, tmp_media, upload_mode, mode):
+async def test_media_ref_follows_mode(
+    plugin, tmp_media, upload_mode, mode, instance
+):
     """file 给本机路径，base64 给内联内容。"""
     upload_mode(mode)
     sub = tmp_media / "abc123"
@@ -93,7 +102,7 @@ async def test_media_ref_follows_mode(plugin, tmp_media, upload_mode, mode):
     media = sub / "a.jpg"
     media.write_bytes(b"hello")
 
-    ref = await plugin._media_ref(media)
+    ref = await instance.delivery.ref(media)
     assert ref == _expected_ref(media, mode)
     if mode == "file":
         assert ref.startswith("file:///")
@@ -101,14 +110,18 @@ async def test_media_ref_follows_mode(plugin, tmp_media, upload_mode, mode):
 
 @pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_single_image_follows_mode(plugin, tmp_media, upload_mode, mode):
+async def test_single_image_follows_mode(
+    plugin, tmp_media, upload_mode, mode, instance
+):
     """单张图片走消息段时按模式给引用。"""
     upload_mode(mode)
     image = tmp_media / "a.jpg"
     image.write_bytes(b"img")
 
     bot = RecordingBot()
-    await plugin._send_media_files(bot, make_group_event("x"), [image])
+    await instance.delivery.send_media(
+        bot, make_group_event("x"), [_as_media(image)]
+    )
 
     segments = _sent_segments(bot)
     assert [segment.type for segment in segments] == ["image"]
@@ -117,14 +130,18 @@ async def test_single_image_follows_mode(plugin, tmp_media, upload_mode, mode):
 
 @pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_single_video_follows_mode(plugin, tmp_media, upload_mode, mode):
+async def test_single_video_follows_mode(
+    plugin, tmp_media, upload_mode, mode, instance
+):
     """单个视频走消息段时同样按模式给引用。"""
     upload_mode(mode)
     video = tmp_media / "b.mp4"
     video.write_bytes(b"vid")
 
     bot = RecordingBot()
-    await plugin._send_media_files(bot, make_group_event("x"), [video])
+    await instance.delivery.send_media(
+        bot, make_group_event("x"), [_as_media(video)]
+    )
 
     segments = _sent_segments(bot)
     assert [segment.type for segment in segments] == ["video"]
@@ -134,7 +151,7 @@ async def test_single_video_follows_mode(plugin, tmp_media, upload_mode, mode):
 @pytest.mark.parametrize("mode", ["file", "http", "base64"])
 @pytest.mark.asyncio
 async def test_unknown_extension_goes_through_group_file(
-    plugin, tmp_media, upload_mode, mode
+    plugin, tmp_media, upload_mode, mode, instance
 ):
     """群文件上传同样跟着模式走。"""
     upload_mode(mode)
@@ -142,7 +159,9 @@ async def test_unknown_extension_goes_through_group_file(
     media.write_bytes(b"bin")
 
     bot = RecordingBot()
-    await plugin._send_media_files(bot, make_group_event("x"), [media])
+    await instance.delivery.send_media(
+        bot, make_group_event("x"), [_as_media(media)]
+    )
 
     uploads = [kw for api, kw in bot.calls if api == "upload_group_file"]
     assert len(uploads) == 1
@@ -154,7 +173,9 @@ async def test_unknown_extension_goes_through_group_file(
 
 @pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_forward_nodes_follow_mode(plugin, tmp_media, upload_mode, mode):
+async def test_forward_nodes_follow_mode(
+    plugin, tmp_media, upload_mode, mode, instance
+):
     """合并转发的每个节点也按模式给引用。"""
     upload_mode(mode)
     first = tmp_media / "a.jpg"
@@ -163,8 +184,10 @@ async def test_forward_nodes_follow_mode(plugin, tmp_media, upload_mode, mode):
     second.write_bytes(b"two")
 
     bot = RecordingBot()
-    assert await plugin._send_forward(
-        bot, make_group_event("x"), [first, second]
+    assert await instance.delivery.send_forward(
+        bot,
+        make_group_event("x"),
+        [_as_media(first), _as_media(second)],
     )
 
     calls = [kw for api, kw in bot.calls if api == "send_group_forward_msg"]
@@ -179,7 +202,7 @@ async def test_forward_nodes_follow_mode(plugin, tmp_media, upload_mode, mode):
 @pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
 async def test_card_image_follows_mode(
-    plugin, tmp_media, upload_mode, monkeypatch, mode
+    plugin, tmp_media, upload_mode, monkeypatch, mode, instance, service
 ):
     """卡片图也走同一个入口。"""
     upload_mode(mode)
@@ -189,17 +212,16 @@ async def test_card_image_follows_mode(
     async def fake_render(*args, **kwargs):
         return card_path
 
-    monkeypatch.setattr(plugin, "_render_card", fake_render)
+    monkeypatch.setattr(instance.cards, "render", fake_render)
 
     bot = RecordingBot()
-    info = await plugin._send_card_or_text(
+    info = await service._send_card_or_text(
+        instance,
         bot,
         make_group_event("x"),
         object(),
-        "哔哩哔哩",
         [],
         tmp_media,
-        plugin.plugin_config,
     )
 
     assert info.sent
@@ -209,28 +231,43 @@ async def test_card_image_follows_mode(
 
 @pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_cached_card_follows_mode(plugin, tmp_media, upload_mode, mode):
+async def test_cached_card_follows_mode(
+    plugin, tmp_path, upload_mode, mode, card, instance, service
+):
     """命中缓存时发的卡片图同样跟着模式走。"""
     upload_mode(mode)
-    entry = tmp_media / "entry"
-    (entry / "files").mkdir(parents=True)
-    (entry / "files" / "a.jpg").write_bytes(b"media")
-    (entry / "card.jpg").write_bytes(b"cached-card")
+    store = plugin.cache.MediaCache(
+        tmp_path / "cache", ttl_seconds=3600, max_bytes=0
+    )
+    media = tmp_path / "a.jpg"
+    media.write_bytes(b"media")
+    card = tmp_path / "card.jpg"
+    card.write_bytes(b"cached-card")
+    store.store(["k"], [media], card=card)
+    entry = store.get("k")
+    assert entry is not None
 
     bot = RecordingBot()
-    assert await plugin._send_cached(
-        bot, make_group_event("x"), entry, plugin.plugin_config
+    assert await service._deliver_cached(
+        instance, bot, make_group_event("x"), entry, "k"
     )
 
     segments = _sent_segments(bot)
-    card_path = entry / "card.jpg"
-    assert segments[0].data["file"] == _expected_ref(card_path, mode)
+    sent = segments[0].data["file"]
+    if mode == "base64":
+        assert sent == _expected_ref(entry.card, mode)
+    else:
+        # 缓存里的卡片会先硬链接进任务目录，路径变了但内容一致
+        from urllib.parse import unquote, urlsplit
+
+        assert sent.startswith("file://")
+        assert Path(unquote(urlsplit(sent).path)).read_bytes() == b"cached-card"
 
 
 @pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
 async def test_non_http_mode_does_not_start_relay(
-    plugin, monkeypatch, upload_mode, mode
+    plugin, monkeypatch, upload_mode, mode, instance
 ):
     """file / base64 都不占端口：启动钩子不应该启动中转服务。"""
     upload_mode(mode)
@@ -238,18 +275,20 @@ async def test_non_http_mode_does_not_start_relay(
     def boom(*args, **kwargs):
         raise AssertionError(f"{mode} 模式不应该启动中转服务")
 
-    monkeypatch.setattr(plugin.server.RELAY, "start", boom)
+    monkeypatch.setattr(instance.relay, "start", boom)
 
     async def noop() -> None:
         return
 
-    monkeypatch.setattr(plugin, "_sweep_expired_media", noop)
+    monkeypatch.setattr(instance, "_sweep_forever", noop)
 
-    await plugin._on_startup()
+    await instance.startup()
 
 
 @pytest.mark.asyncio
-async def test_http_mode_starts_relay(plugin, monkeypatch, upload_mode):
+async def test_http_mode_starts_relay(
+    plugin, monkeypatch, upload_mode, instance
+):
     """http 模式仍然启动中转服务（回归保护）。"""
     upload_mode("http")
     started: list[tuple[str, int]] = []
@@ -258,14 +297,14 @@ async def test_http_mode_starts_relay(plugin, monkeypatch, upload_mode):
         started.append((host, port))
         return 18899
 
-    monkeypatch.setattr(plugin.server.RELAY, "start", fake_start)
-    monkeypatch.setattr(plugin.server, "guess_lan_ip", lambda: "10.0.0.2")
+    monkeypatch.setattr(instance.relay, "start", fake_start)
+    monkeypatch.setattr(plugin.app, "guess_lan_ip", lambda: "10.0.0.2")
 
     async def noop() -> None:
         return
 
-    monkeypatch.setattr(plugin, "_sweep_expired_media", noop)
+    monkeypatch.setattr(instance, "_sweep_forever", noop)
 
-    await plugin._on_startup()
-    assert started == [("0.0.0.0", plugin.plugin_config.parsehub_files_port)]
-    assert plugin._ENDPOINT.host == "10.0.0.2"
+    await instance.startup()
+    assert started == [("0.0.0.0", instance.settings.relay_port)]
+    assert instance.endpoint.host == "10.0.0.2"
