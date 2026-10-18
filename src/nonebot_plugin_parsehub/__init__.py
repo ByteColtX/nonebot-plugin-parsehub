@@ -10,7 +10,9 @@
 
 1. 收到链接立刻给原消息点一个表情回应（不等解析结果）；
 2. 解析出平台、标题、正文和媒体直链；
-3. 下载媒体到本机临时目录，再用内置 HTTP 服务给协议端一个 http 地址；
+3. 下载媒体到本机临时目录，再按 ``PARSEHUB_UPLOAD_MODE`` 交给协议端：
+   ``http`` 模式用内置只读 HTTP 服务发地址让协议端自己拉，``base64`` 模式把
+   文件内容内联进消息段；
 4. 媒体多于一个时合并转发，否则逐条发送；一个作品最多发 20 个媒体，多出来的
    不发（图集动辄上百张，全发会把协议端拖到超时）。
 
@@ -22,6 +24,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import time
@@ -429,10 +432,40 @@ async def _react(bot: Bot, event: MessageEvent, emoji_id: str) -> None:
         logger.debug(f"[parsehub] 表情回应 {emoji_id} 失败（忽略）: {exc}")
 
 
+async def _media_ref(path: Path) -> str:
+    """把本地文件变成协议端能取到的引用。
+
+    ``http`` 模式返回中转服务的地址，让协议端自己来拉；``base64`` 模式把文件内容
+    内联进消息段（OneBot v11 的 ``base64://`` 写法），协议端不需要能访问本机。
+
+    Args:
+        path: 本地媒体文件路径。
+
+    Returns:
+        可直接赋给消息段 ``file`` 字段的字符串。
+    """
+    if plugin_config.parsehub_upload_mode == "base64":
+        # 读整份文件 + 编码是纯 CPU/IO 活，放线程池里，不阻塞事件循环
+        return await asyncio.to_thread(_to_base64, path)
+    return server.RELAY.url_for(path, _ENDPOINT.host, _ENDPOINT.port)
+
+
+def _to_base64(path: Path) -> str:
+    """把文件读成 ``base64://`` 内联串。
+
+    Args:
+        path: 本地媒体文件路径。
+
+    Returns:
+        形如 ``base64://<b64>`` 的字符串。
+    """
+    return "base64://" + base64.b64encode(path.read_bytes()).decode("ascii")
+
+
 async def _send_file(
     bot: Bot,
     event: MessageEvent,
-    url: str,
+    ref: str,
     name: str,
 ) -> bool:
     """以群文件 / 私聊文件的形式上传媒体。
@@ -440,7 +473,7 @@ async def _send_file(
     Args:
         bot: 当前 Bot 实例。
         event: 触发消息事件。
-        url: 协议端可下载的地址。
+        ref: 协议端能取到的文件引用（http 地址或 ``base64://``）。
         name: 展示用的文件名。
 
     Returns:
@@ -451,14 +484,14 @@ async def _send_file(
             await bot.call_api(
                 "upload_group_file",
                 group_id=event.group_id,
-                file=url,
+                file=ref,
                 name=name,
             )
         else:
             await bot.call_api(
                 "upload_private_file",
                 user_id=event.user_id,
-                file=url,
+                file=ref,
                 name=name,
             )
     except Exception as exc:  # noqa: BLE001 - 协议端可能不支持文件上传
@@ -470,7 +503,7 @@ async def _send_file(
 async def _send_video(
     bot: Bot,
     event: MessageEvent,
-    url: str,
+    ref: str,
     name: str,
 ) -> bool:
     """用 video 消息段发送视频（不占群文件）。
@@ -478,14 +511,14 @@ async def _send_video(
     Args:
         bot: 当前 Bot 实例。
         event: 触发消息事件。
-        url: 协议端可下载的地址。
+        ref: 协议端能取到的文件引用（http 地址或 ``base64://``）。
         name: 展示用的文件名，仅用于日志。
 
     Returns:
         发送成功返回 True。
     """
     try:
-        await bot.send(event, MessageSegment.video(file=url))
+        await bot.send(event, MessageSegment.video(file=ref))
     except ActionFailed as exc:
         logger.warning(f"[parsehub] video 消息段被拒绝: {exc}")
         return False
@@ -514,11 +547,11 @@ async def _send_forward(
     nodes: list[dict] = []
     for path in files:
         suffix = path.suffix.lower()
-        url = server.RELAY.url_for(path, _ENDPOINT.host, _ENDPOINT.port)
+        ref = await _media_ref(path)
         if suffix in _IMAGE_EXTENSIONS:
-            content = {"type": "image", "data": {"file": url}}
+            content = {"type": "image", "data": {"file": ref}}
         elif suffix in _VIDEO_EXTENSIONS:
-            content = {"type": "video", "data": {"file": url}}
+            content = {"type": "video", "data": {"file": ref}}
         else:
             return False
         nodes.append(
@@ -611,12 +644,12 @@ async def _send_media_files(
 
     failed = False
     for path in items:
-        url = server.RELAY.url_for(path, _ENDPOINT.host, _ENDPOINT.port)
+        ref = await _media_ref(path)
         suffix = path.suffix.lower()
         if suffix in _IMAGE_EXTENSIONS:
-            await bot.send(event, MessageSegment.image(file=url))
+            await bot.send(event, MessageSegment.image(file=ref))
         elif suffix in _VIDEO_EXTENSIONS:
-            if await _send_video(bot, event, url, path.name):
+            if await _send_video(bot, event, ref, path.name):
                 continue
             failed = True
             if plugin_config.parsehub_fail_notice:
@@ -625,7 +658,7 @@ async def _send_media_files(
                     event,
                     Message("⚠️ 视频发送失败（协议端拒绝了 video 消息段）"),
                 )
-        elif not await _send_file(bot, event, url, path.name):
+        elif not await _send_file(bot, event, ref, path.name):
             failed = True
             if plugin_config.parsehub_fail_notice:
                 await _send(bot, event, Message("⚠️ 文件发送失败"))
@@ -1185,9 +1218,9 @@ async def _send_card_or_text(
     if cfg.parsehub_card:
         out_path = await _render_card(result, files, task_dir, cfg, proxy)
         if out_path is not None:
-            url = server.RELAY.url_for(out_path, _ENDPOINT.host, _ENDPOINT.port)
             try:
-                await bot.send(event, MessageSegment.image(file=url))
+                ref = await _media_ref(out_path)
+                await bot.send(event, MessageSegment.image(file=ref))
                 return _SentInfo(sent=True, card=out_path)
             except Exception as exc:  # noqa: BLE001 - 发图失败就退回文字
                 logger.warning(
@@ -1225,9 +1258,9 @@ async def _send_cached(
 
     card = mediacache.MediaCache.card_path(entry)
     if cfg.parsehub_card and card is not None:
-        url = server.RELAY.url_for(card, _ENDPOINT.host, _ENDPOINT.port)
         try:
-            await bot.send(event, MessageSegment.image(file=url))
+            ref = await _media_ref(card)
+            await bot.send(event, MessageSegment.image(file=ref))
         except Exception as exc:  # noqa: BLE001 - 发图失败就退回文字
             logger.warning(
                 f"[parsehub] 缓存卡片发送失败: {type(exc).__name__}: {exc}"
@@ -1528,16 +1561,22 @@ async def _warm_parsehub() -> None:
 
 @driver.on_startup
 async def _on_startup() -> None:
-    """启动媒体中转服务，并开始定期清理临时文件。"""
+    """按上传模式启动媒体中转服务，并开始定期清理临时文件。"""
     cfg = plugin_config
-    bind_host = cfg.parsehub_files_host or "0.0.0.0"
-    _ENDPOINT.port = server.RELAY.start(bind_host, cfg.parsehub_files_port)
-    _ENDPOINT.host = cfg.parsehub_files_host or server.guess_lan_ip()
-    logger.info(
-        f"[parsehub] 媒体中转服务: "
-        f"http://{_ENDPOINT.host}:{_ENDPOINT.port}/  "
-        f"根目录: {server.RELAY.root}"
-    )
+    if cfg.parsehub_upload_mode == "http":
+        bind_host = cfg.parsehub_files_host or "0.0.0.0"
+        _ENDPOINT.port = server.RELAY.start(bind_host, cfg.parsehub_files_port)
+        _ENDPOINT.host = cfg.parsehub_files_host or server.guess_lan_ip()
+        logger.info(
+            f"[parsehub] 媒体中转服务: "
+            f"http://{_ENDPOINT.host}:{_ENDPOINT.port}/  "
+            f"根目录: {server.RELAY.root}"
+        )
+    else:
+        logger.info(
+            "[parsehub] 媒体上传走 base64，中转服务未启动（不占端口）；"
+            f"根目录: {server.RELAY.root}"
+        )
     if cfg.parsehub_card and cfg.parsehub_card_font:
         font_path = Path(cfg.parsehub_card_font).expanduser()
         if font_path.exists():
