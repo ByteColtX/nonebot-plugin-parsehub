@@ -267,3 +267,74 @@ async def test_cache_stores_only_sent_media(
     entry = instance.cache.get("b23.tv/abcd")
     assert entry is not None
     assert [path.name for path in entry.files] == ["small.jpg"]
+
+
+async def test_unexpected_error_still_gets_a_terminal_signal(
+    instance, service, monkeypatch
+) -> None:
+    """兜底：内部异常也要有提示和失败表情，不能静默。"""
+    _patch_parse(instance, monkeypatch)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("内部炸了")
+
+    monkeypatch.setattr(service, "_deliver", boom)
+
+    bot = FakeBot()
+    result = await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert result.outcome is service.Outcome.INTERNAL_ERROR
+    assert any("出错" in text for text in bot.sent_texts), bot.sent_texts
+    assert "5" in [
+        kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
+    ]
+
+
+async def test_support_check_failure_falls_through_to_parse(
+    instance, service, monkeypatch
+) -> None:
+    """is_supported 自己炸了不该把整条消息吞掉，交给解析去报错。"""
+    monkeypatch.setattr(
+        instance.client,
+        "platform_id",
+        lambda url: asyncio.sleep(0, result="bilibili"),
+    )
+
+    async def broken(url):
+        raise RuntimeError("判断失败")
+
+    monkeypatch.setattr(instance.client, "is_supported", broken)
+    monkeypatch.setattr(
+        instance.client,
+        "parse",
+        lambda url, proxy="", cookie="": asyncio.sleep(
+            0, result=FakeParseResult(media=None)
+        ),
+    )
+
+    result = await service.handle(
+        instance, FakeBot(), make_group_event(URL), URL
+    )
+    assert result.outcome is service.Outcome.NO_MEDIA
+
+
+async def test_dedupe_window_zero_does_not_grow(
+    instance, service, monkeypatch, update_settings
+) -> None:
+    """PARSEHUB_DEDUPE_SECONDS=0 时不能把每个作品都记进 _seen。"""
+    update_settings(dedupe_seconds=0)
+    _patch_parse(
+        instance,
+        monkeypatch,
+        parse=lambda url, proxy="", cookie="": asyncio.sleep(
+            0, result=FakeParseResult(media=None)
+        ),
+    )
+    event = make_group_event(URL)
+
+    first = await service.handle(instance, FakeBot(), event, URL)
+    second = await service.handle(instance, FakeBot(), event, URL)
+
+    assert first.outcome is service.Outcome.NO_MEDIA
+    assert second.outcome is service.Outcome.NO_MEDIA, "窗口为 0 不该去重"
+    assert instance.dedupe._seen == {}

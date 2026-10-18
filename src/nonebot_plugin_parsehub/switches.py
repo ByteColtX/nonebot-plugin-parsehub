@@ -31,6 +31,9 @@ logger = logging.getLogger("nonebot_plugin_parsehub.switches")
 # 没有记录时的默认值：群和私聊一样，都是允许解析。
 DEFAULT_ON = True
 
+# 落盘格式版本：只有这个版本会被读取，旧格式直接忽略（不做迁移）。
+SCHEMA = 2
+
 
 def group_key(group_id: int) -> str:
     """群会话的键。
@@ -89,19 +92,27 @@ class SwitchStore:
             )
             self._state = {}
             return
-        if not isinstance(raw, dict):
-            logger.warning("[parsehub] 解析开关文件格式不对，按默认值处理")
+        if not isinstance(raw, dict) or raw.get("schema") != SCHEMA:
+            logger.warning(
+                f"[parsehub] 解析开关文件不是 schema {SCHEMA}，按默认值处理"
+            )
             self._state = {}
             return
-        self._state = {str(key): bool(value) for key, value in raw.items()}
+        sessions = raw.get("sessions")
+        if not isinstance(sessions, dict):
+            logger.warning("[parsehub] 解析开关文件缺少 sessions，按默认值处理")
+            self._state = {}
+            return
+        self._state = {str(key): bool(value) for key, value in sessions.items()}
 
     def save(self) -> None:
         """原子写盘（先写 ``*.tmp`` 再 rename）。"""
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_name(self.path.name + ".tmp")
+            payload = {"schema": SCHEMA, "sessions": self._state}
             tmp.write_text(
-                json.dumps(self._state, ensure_ascii=False, sort_keys=True),
+                json.dumps(payload, ensure_ascii=False, sort_keys=True),
                 "utf-8",
             )
             os.replace(tmp, self.path)

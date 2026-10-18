@@ -340,6 +340,7 @@ class Delivery:
             try:
                 size = file.path.stat().st_size
             except OSError:
+                report.skipped.append(file)
                 continue
             if limit and size > limit:
                 report.skipped.append(file)
