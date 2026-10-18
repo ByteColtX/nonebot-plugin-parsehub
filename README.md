@@ -31,7 +31,7 @@
 - **体积 / 时长保护 / 去重 / 并发限制 / 临时文件自动清理**（去重只作用于同一会话，跨会话不限制）
 - **时长保护**：视频超过 `PARSEHUB_MAX_SECONDS`（默认 5 分钟）时不下载，只发封面卡片 + 一句「视频太长啦，还是去 xx 看吧」
 - **媒体缓存**：同一作品 24 小时内再出现，直接发本地那份，不再解析下载
-- **上传方式可选**：`PARSEHUB_UPLOAD_MODE` 三选一 —— `file`（默认，直接发本机路径）/ `http`（协议端来拉）/ `base64`（内容内联）
+- **上传方式可选**：`PARSEHUB_DELIVERY` 三选一 —— `file`（默认，直接发本机路径）/ `http`（协议端来拉）/ `base64`（内容内联）
 
 ## 🎨 效果图
 
@@ -138,7 +138,7 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 | 配置项 | 必填 | 默认值 | 说明 |
 | :---: | :---: | :---: | :--- |
 | `PARSEHUB_AUTO` | 否 | `true` | 群里出现链接时自动解析（总开关） |
-| `PARSEHUB_MAX_MB` | 否 | `100` | 单个媒体文件体积上限（MB），超过直接跳过；`0` = 不限 |
+| `PARSEHUB_MAX_FILE_MB` | 否 | `100` | 单个媒体文件体积上限（MB），超过直接跳过；`0` = 不限 |
 | `PARSEHUB_MAX_SECONDS` | 否 | `300` | 视频时长上限（秒），超过只发封面 + 一句提示、不下载；`0` = 不限 |
 | `PARSEHUB_PLATFORMS` | 否 | 无 | 平台白名单：只解析这些平台，留空 = 全部。可写平台 id（`xhs`）或中文名（`小红书`） |
 | `PARSEHUB_DEDUPE_SECONDS` | 否 | `120` | 同一会话内同一链接的去重窗口（秒），`0` = 不去重 |
@@ -147,7 +147,7 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 | `PARSEHUB_PROXY_PLATFORMS` | 否 | 海外 8 平台 | 只对这些平台走代理，留空 = 全部走（列表要用合法 JSON） |
 | `PARSEHUB_COOKIE` | 否 | 无 | 兜底 cookie（优先读 parsehub 自己的 `cookies.toml`） |
 | `PARSEHUB_TIMEOUT` | 否 | `180` | 解析 + 下载总超时（秒） |
-| `PARSEHUB_CACHE_HOURS` | 否 | `24` | 媒体缓存保留小时数，命中就直接发本地那份；`0` = 关闭缓存 |
+| `PARSEHUB_CACHE_TTL_HOURS` | 否 | `24` | 媒体缓存保留小时数，命中就直接发本地那份；`0` = 关闭缓存 |
 | `PARSEHUB_CACHE_MAX_MB` | 否 | `1024` | 媒体缓存总容量上限（MB），超了按最久没用过的删 |
 | `PARSEHUB_CARD` | 否 | `true` | 是否发信息卡片图（失败自动退回文字） |
 | `PARSEHUB_CARD_FONT` | 否 | 无 | 中文字体路径，留空则自动找系统字体 / 下载 |
@@ -155,12 +155,14 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 | `PARSEHUB_SEND_TEXT` | 否 | `true` | 是否发送标题 / 正文 |
 | `PARSEHUB_MAX_CHARS` | 否 | `300` | 正文最多发送多少字符 |
 | `PARSEHUB_FAIL_NOTICE` | 否 | `true` | 视频发送失败时是否额外发文字提示 |
-| `PARSEHUB_UPLOAD_MODE` | 否 | `file` | 媒体交给协议端的方式：`file` = 发本机 `file://` 路径（要求同机）；`http` = 发中转地址让协议端自己拉；`base64` = 内容内联进消息段 |
-| `PARSEHUB_FILES_HOST` | 否 | 无 | 媒体中转服务对外地址，留空自动探测内网 IP（仅 `http` 模式） |
-| `PARSEHUB_FILES_PORT` | 否 | `21473` | 媒体中转服务端口（仅 `http` 模式） |
-| `PARSEHUB_KEEP_MINUTES` | 否 | `30` | 临时文件保留分钟数 |
+| `PARSEHUB_DELIVERY` | 否 | `file` | 媒体交给协议端的方式：`file` = 发本机 `file://` 路径（要求同机）；`http` = 发中转地址让协议端自己拉；`base64` = 内容内联进消息段 |
+| `PARSEHUB_RELAY_HOST` | 否 | 无 | 媒体中转服务对外地址，留空自动探测内网 IP（仅 `http` 模式） |
+| `PARSEHUB_RELAY_PORT` | 否 | `21473` | 媒体中转服务端口（仅 `http` 模式） |
+| `PARSEHUB_TASK_TTL_MINUTES` | 否 | `30` | 临时文件保留分钟数 |
 
 > 列表类配置必须是合法 JSON，例如 `PARSEHUB_PROXY_PLATFORMS=["twitter", "youtube"]`。
+> 数值项有下界校验（例如 `PARSEHUB_TIMEOUT >= 5`、`PARSEHUB_TASK_TTL_MINUTES >= 1`），
+> 写成 0 或负数会在启动时直接报错，而不是运行到一半才出问题。
 > 哪些群 / 私聊解析由命令 `解析开关` 控制（见下），没有对应的配置项。
 
 需要登录态的平台（X、Instagram、TikTok、豆瓣、微信视频号 等），cookie 优先从 ParseHub 自己的配置读取
@@ -201,6 +203,8 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 
 - **按作品存，不按会话**：A 群发过的视频，B 群再发也是直接发本地那份
 - **命中即跳过**：不解析、不下载、不画卡（卡片图也一起缓存）
+- **落在哪**：缓存在插件缓存目录的 `media/` 下（目录名由作品 key 哈希而来），
+  中转服务只服务同级的 `relay/`，缓存不会被暴露出去
 - **识别不同写法**：`b23.tv/xxx` 与 `bilibili.com/video/BVxxx`、`v.douyin.com/xxx`
   与 `iesdouyin.com/share/video/<id>` 是同一个作品
 - **保留 24 小时**（用过的会续期），总量上限 1GB，超了按最久没用过的删
@@ -211,7 +215,7 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 ### 说明
 
 - 视频走 `video` 消息段，被协议端拒绝时只回应失败表情，**不会**退回群文件
-- 媒体先落到本机临时目录，再按 `PARSEHUB_UPLOAD_MODE` 交给协议端（三选一）：
+- 媒体先落到本机临时目录，再按 `PARSEHUB_DELIVERY` 交给协议端（三选一）：
   - `file`（默认）：直接发 `file:///...` 本机路径。协议端和机器人跑在同一台机器上时
     零配置即可用，不开端口、不做额外拷贝；协议端读不到该路径就发不出去
   - `http`：通过内置的只读 HTTP 服务给协议端一个 `http://` 地址，过期自动清理。
@@ -220,8 +224,10 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
     代价是请求体大约增大 1/3，大视频更容易被协议端拒掉
   - 三种模式**都不做兜底**：选了哪种就是哪种，发不出去就点失败表情 / 发失败提示，
     不会偷偷换一种方式重发
-- **从旧版本升级**：默认值从 `http` 改成了 `file`。如果你的协议端不在本机，
-  必须在 `.env` 里显式设 `PARSEHUB_UPLOAD_MODE=http`，否则媒体会发不出去
+- **从旧版本升级**：这一版把 `PARSEHUB_UPLOAD_MODE` 改名为 `PARSEHUB_DELIVERY`，
+  并把默认值从 `http` 改成 `file`；`MAX_MB` / `CACHE_HOURS` / `KEEP_MINUTES` /
+  `FILES_HOST` / `FILES_PORT` 也一并改名（见上表）。旧键不会被读取，请按新表更新
+  `.env`；协议端不在本机时务必显式设 `PARSEHUB_DELIVERY=http`，否则媒体发不出去
 - parsehub 全程是同步阻塞的，插件把所有调用放进 `asyncio.to_thread`，不会阻塞事件循环
 - 解析器首次导入需要几秒（numpy + opencv），插件采用懒加载，不影响机器人启动
 - 信息卡片用 Pillow 画，封面三级兜底：`thumb_url` → 本身就是图片的媒体 → 本地视频抽首帧；
@@ -241,11 +247,31 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 
 ```bash
 uv sync --all-groups            # 安装依赖（含测试）
+uv run poe check                # 代码检查 + 格式检查 + 测试（CI 同款）
 uv run pytest -q                # 跑测试
 uv run ruff check .             # 代码检查
 uv run ruff format --check .    # 格式检查
-uv run python live_check.py     # 真实链路自检（解析 → 下载 → 中转取回）
+uv run poe live                 # 真实链路自检（解析 → 下载 → 中转取回）
 ```
+
+### 代码结构
+
+```
+src/nonebot_plugin_parsehub/
+├── triggers.py         # matcher / 命令：只决定「处理谁」
+├── service.py          # 编排：每个结局都是 Outcome 里的一个值
+├── delivery.py         # 三种上传模式 + 合并转发/逐条 + 统一失败记账
+├── feedback.py         # 表情回应与用户提示文案
+├── cache.py            # 作品级媒体缓存（哈希目录、原子写）
+├── dedupe.py           # 会话级去重（claim / commit / release）
+├── relay.py            # 只读中转服务（只服务 relay/）
+├── parsehub_client.py  # ParseHub 懒加载 + 线程池封装
+├── card/               # fonts / cover / layout + CardRenderer
+└── app.py              # 装配与生命周期
+```
+
+模块级单例已全部移除：`App` 持有设置、客户端、缓存、去重、开关、中转、投递和卡片，
+测试直接 `App.build(...)` 造独立实例。
 
 ### 代码风格
 
