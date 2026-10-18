@@ -29,7 +29,7 @@ from .app import App
 from .config import Config, Settings, plugin_config
 
 __plugin_meta__ = PluginMetadata(
-    name="ParseHub 链接解析",
+    name="轻量、异步、开箱即用的社交媒体聚合解析插件",
     description=(
         "群里出现受支持的分享链接时，用 ParseHub 自动解析并发送媒体"
         "（视频 / 图集 / 正文）。"
