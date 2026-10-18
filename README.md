@@ -29,13 +29,9 @@
 
 ## 🎨 效果图
 
-B 站视频卡片：
-
-<img src="https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-bilibili.jpg" width="420" alt="B 站卡片">
-
-抖音图集卡片：
-
-<img src="https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-douyin.jpg" width="420" alt="抖音卡片">
+| B 站视频卡片 | 抖音图集卡片 |
+| :---: | :---: |
+| <img src="https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-bilibili.jpg" width="420" alt="B 站卡片"> | <img src="https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-douyin.jpg" width="420" alt="抖音卡片"> |
 
 ## 💿 安装
 
