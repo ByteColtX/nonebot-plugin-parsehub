@@ -58,7 +58,7 @@ def _read_cookie_file(platform: str) -> str:
             return ""
         with path.open("rb") as file:
             data = tomllib.load(file)
-    except (ImportError, OSError, ValueError):
+    except (OSError, ValueError):
         return ""
     value = (data.get("cookie") or {}).get(platform)
     return str(value) if value else ""

@@ -9,15 +9,13 @@
 from __future__ import annotations
 
 import io
-import logging
 from pathlib import Path
 from typing import Any
 
 import httpx
+from nonebot import logger
 
 from .fonts import _pil
-
-logger = logging.getLogger("nonebot_plugin_parsehub.card.cover")
 
 
 def _is_placeholder(data: bytes, image: Any) -> bool:  # noqa: ANN401 - PIL Image
@@ -39,19 +37,18 @@ def _is_placeholder(data: bytes, image: Any) -> bool:  # noqa: ANN401 - PIL Imag
 def _frame_from_video(path: Path) -> bytes | None:
     """从本地视频里抽第一帧当封面。
 
+    同步阻塞，调用方必须放进线程池。opencv 首次 import 要几百毫秒，所以延迟到
+    函数里加载。
+
     Args:
         path: 本地视频路径。
 
     Returns:
         JPEG 字节；抽不出来时为 ``None``。
     """
-    try:
-        import cv2
+    import cv2
 
-        Image = _pil()  # noqa: N806 - 与 PIL 模块名保持一致
-    except ImportError:
-        return None
-
+    Image = _pil()  # noqa: N806 - 与 PIL 模块名保持一致
     cap = cv2.VideoCapture(str(path))
     try:
         ok, frame = cap.read()

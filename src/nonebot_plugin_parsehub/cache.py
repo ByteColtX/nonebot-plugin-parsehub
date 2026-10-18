@@ -20,14 +20,13 @@
 
 所有方法都是同步的（磁盘 IO），调用方负责放进线程池。
 
-模块不依赖 nonebot，方便单独测试。
+除 ``nonebot.logger`` 外不依赖 nonebot，方便单独测试。
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import os
 import shutil
 import time
@@ -36,7 +35,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger("nonebot_plugin_parsehub.cache")
+from nonebot import logger
 
 # 目录与文件名。
 FILES_DIR_NAME = "files"
@@ -182,20 +181,6 @@ class MediaCache:
             seconds=int(meta.get("seconds") or 0),
             keys=tuple(meta.get("keys") or ()),
         )
-
-    def entry_keys(self, entry: Path) -> list[str]:
-        """条目对应的所有作品 key。
-
-        Args:
-            entry: 条目目录。
-
-        Returns:
-            作品 key 列表；读不出来时为空列表。
-        """
-        meta = self._read_meta(entry)
-        if meta is None:
-            return []
-        return [str(key) for key in meta.get("keys") or () if key]
 
     def remember_key(self, entry: Path, key: str) -> None:
         """把 key 补记到条目里（老条目命中时顺手补上）。

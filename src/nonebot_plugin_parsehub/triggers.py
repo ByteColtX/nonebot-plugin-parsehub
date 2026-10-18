@@ -12,6 +12,7 @@ matcher 由 :func:`create_matchers` 按传入的 ``App`` 创建，测试可以�
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -34,9 +35,6 @@ if TYPE_CHECKING:
 
 # 单条消息最多处理几个链接。
 MAX_LINKS_PER_MESSAGE = 3
-
-# 命令触发时用来跳过自动解析的前缀。
-COMMAND_PREFIXES = ("解析", "ph", "/解析", "/ph")
 
 # 「解析开关」命令能接受的参数写法。
 ON_WORDS = frozenset({"开", "开启", "打开", "on", "true", "1"})
@@ -127,6 +125,11 @@ def can_control(event: MessageEvent) -> bool:
 async def should_auto(app: App, event: MessageEvent) -> bool:
     """判断是否应该自动解析这条消息。
 
+    命令不需要在这里排除：``解析`` / ``ph`` 等命令匹配器 ``priority=10`` 且
+    ``block=True``，命中后事件不会流到 ``priority=20`` 的自动匹配器。反过来，
+    ``COMMAND_START`` 没配空前缀时裸写的「解析 <链接>」本来就不是命令，必须按
+    普通消息自动解析，否则两个匹配器都不管、消息被静默丢弃。
+
     Args:
         app: 插件实例（需要 ``settings`` 与 ``switches``）。
         event: 收到的消息事件。
@@ -140,9 +143,6 @@ async def should_auto(app: App, event: MessageEvent) -> bool:
         return False
     if not switches.is_on(session_key(event)):
         return False  # 这个会话被关掉了
-    text = event.get_plaintext()
-    if text.lstrip().startswith(COMMAND_PREFIXES):
-        return False  # 命令触发交给命令匹配器
     return bool(keys.extract_urls(link_sources(event)))
 
 
@@ -267,7 +267,8 @@ def create_matchers(app: App) -> Matchers:
         else:
             want = not switches.is_on(key)
 
-        switches.set(key, want)
+        # 落盘是同步磁盘 IO，交给线程池，别卡住事件循环
+        want = await asyncio.to_thread(switches.set, key, want)
         name = session_name(event)
         logger.info(
             f"[parsehub] {name}解析开关 -> {'开' if want else '关'}"

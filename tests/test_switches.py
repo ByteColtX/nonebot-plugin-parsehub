@@ -13,7 +13,7 @@ def test_default_on_for_group_and_private(tmp_path: Path, switches) -> None:
     store = switches.SwitchStore(tmp_path / "sessions.json")
     assert store.is_on(switches.group_key(123456789)) is True
     assert store.is_on(switches.private_key(20000)) is True
-    assert store.off_keys() == []
+    assert not store.path.exists()
 
 
 def test_set_off_then_persist(tmp_path: Path, switches) -> None:
@@ -26,7 +26,8 @@ def test_set_off_then_persist(tmp_path: Path, switches) -> None:
     again = switches.SwitchStore(path)
     assert again.is_on(switches.group_key(123)) is False
     assert again.is_on(switches.group_key(456)) is True
-    assert again.off_keys() == ["group:123"]
+    assert '"group:123"' in path.read_text("utf-8")
+    assert '"group:456"' not in path.read_text("utf-8")
 
 
 def test_set_back_to_default_removes_record(tmp_path: Path, switches) -> None:
@@ -37,7 +38,6 @@ def test_set_back_to_default_removes_record(tmp_path: Path, switches) -> None:
     assert '"group:123"' in path.read_text("utf-8")
     store.set(switches.group_key(123), True)
     assert store.is_on(switches.group_key(123)) is True
-    assert store.off_keys() == []
     assert '"group:123"' not in path.read_text("utf-8")
 
 
@@ -53,16 +53,6 @@ def test_private_disable_is_recorded(tmp_path: Path, switches) -> None:
     assert again.is_on(switches.private_key(20000)) is False
     again.set(switches.private_key(20000), True)  # 开回来 = 默认值
     assert '"private:20000"' not in path.read_text("utf-8")
-
-
-def test_toggle(tmp_path: Path, switches) -> None:
-    """不带参数就是翻转。"""
-    store = switches.SwitchStore(tmp_path / "sessions.json")
-    key = switches.group_key(1)
-    assert store.toggle(key) is False
-    assert store.is_on(key) is False
-    assert store.toggle(key) is True
-    assert store.is_on(key) is True
 
 
 def test_broken_file_falls_back_to_default(tmp_path: Path, switches) -> None:

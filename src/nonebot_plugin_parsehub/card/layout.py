@@ -157,21 +157,6 @@ def _advance(text: str, font: Any, emoji_size: int = 0) -> float:  # noqa: ANN40
     return total
 
 
-def _can_draw_emoji(font: Any, text: str) -> bool:  # noqa: ANN401 - PIL FreeTypeFont
-    """查 emoji 字体里有没有这段文字的字形。
-
-    等价于 :func:`_has_glyph`，保留这个名字是因为 emoji 那条路径一直在用它。
-
-    Args:
-        font: emoji 字体对象。
-        text: 待画片段。
-
-    Returns:
-        有字形为 ``True``。
-    """
-    return _has_glyph(font, text)
-
-
 def _strip_variation(text: str) -> str:
     """去掉变体选择符（U+FE0E / U+FE0F）。
 

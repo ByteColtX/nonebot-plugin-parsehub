@@ -235,7 +235,11 @@ async def test_manual_parse_allowed_for_admin_when_closed(
         ctx.receive_event(bot, event)
         ctx.should_call_api(
             "set_msg_emoji_like",
-            {"message_id": 112, "emoji_id": plugin.REACT_START, "set": True},
+            {
+                "message_id": 112,
+                "emoji_id": plugin.feedback.Reaction.START,
+                "set": True,
+            },
             result=None,
         )
         ctx.should_call_send(
@@ -243,7 +247,11 @@ async def test_manual_parse_allowed_for_admin_when_closed(
         )
         ctx.should_call_api(
             "set_msg_emoji_like",
-            {"message_id": 112, "emoji_id": plugin.REACT_FAIL, "set": True},
+            {
+                "message_id": 112,
+                "emoji_id": plugin.feedback.Reaction.FAIL,
+                "set": True,
+            },
             result=None,
         )
         ctx.should_finished()

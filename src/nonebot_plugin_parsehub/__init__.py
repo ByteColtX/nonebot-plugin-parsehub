@@ -24,7 +24,7 @@ from __future__ import annotations
 from nonebot import get_driver
 from nonebot.plugin import PluginMetadata
 
-from . import feedback, triggers
+from . import triggers
 from .app import App
 from .config import Config, Settings, plugin_config
 
@@ -35,8 +35,8 @@ __plugin_meta__ = PluginMetadata(
         "（视频 / 图集 / 正文）。"
     ),
     usage=(
-        "发链接即可自动解析；命令：解析 <链接或分享文案>、解析平台、"
-        "解析开关 [开|关]（超管 / 群管理）、解析状态"
+        "发链接即可自动解析；命令：/解析 <链接或分享文案>、/解析平台、"
+        "/解析开关 [开|关]（超管 / 群管理）、/解析状态"
     ),
     type="application",
     homepage="https://github.com/ByteColtX/nonebot-plugin-parsehub",
@@ -45,16 +45,11 @@ __plugin_meta__ = PluginMetadata(
     extra={"parsehub": "https://github.com/z-mio/ParseHub"},
 )
 
-# 表情 ID：收到 / 成功 / 失败。
-REACT_START = feedback.Reaction.START
-REACT_OK = feedback.Reaction.OK
-REACT_FAIL = feedback.Reaction.FAIL
-
 # 进程内唯一的插件实例；测试可以自己 App.build() 一个。
 APP = App.build(Settings.from_config(plugin_config))
 
-# matcher 注册（处理函数闭包捕获 APP）。
-MATCHERS = triggers.create_matchers(APP)
+# matcher 注册（处理函数闭包捕获 APP）；注册本身有副作用，不需要保留返回值。
+triggers.create_matchers(APP)
 
 driver = get_driver()
 driver.on_startup(APP.startup)

@@ -7,13 +7,15 @@ ParseHub 的异常类型很多，而且 import 代价高（会拉起 numpy / ope
 **边界**把异常翻译成 :class:`ParseFailure` + :class:`ErrorKind`，上层只按 kind
 分支，不再靠字符串猜「是不是作品被删了」。
 
-``translate`` 首次调用时才 import ``parsehub.errors``，之后复用类对象；拿不到
-时退回按类名判断。
+``translate`` 首次调用时才 import ``parsehub.errors``，之后复用类对象；异常被
+包装过时再退回类名 / 文案判断。
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
+
+import httpx
 
 # 错误提示最长留多少个字（QQ 气泡里一行放不下更长的）。
 MAX_ERROR_CHARS = 80
@@ -109,29 +111,28 @@ def truncate_error(text: str) -> str:
     return text[: MAX_ERROR_CHARS - 1] + "…"
 
 
-# parsehub 的异常类，首次 translate 时加载；空元组表示拿不到。
+# parsehub 的异常类，首次用到时加载并缓存。
 _PARSEHUB_ERRORS: dict[str, type[BaseException]] | None = None
 
 
 def _parsehub_errors() -> dict[str, type[BaseException]]:
     """加载并缓存 parsehub 的异常类。
 
+    parsehub 的 import 很贵（会拉起 numpy / opencv），所以第一次用到才 import。
+
     Returns:
-        类名到类对象的映射；parsehub 不可用时为空字典。
+        类名到类对象的映射。
     """
     global _PARSEHUB_ERRORS  # noqa: PLW0603 - 单例式缓存
     if _PARSEHUB_ERRORS is None:
-        try:
-            from parsehub import errors as module
-        except ImportError:
-            _PARSEHUB_ERRORS = {}
-        else:
-            _PARSEHUB_ERRORS = {
-                name: value
-                for name in dir(module)
-                if isinstance(value := getattr(module, name), type)
-                and issubclass(value, BaseException)
-            }
+        from parsehub import errors as module
+
+        _PARSEHUB_ERRORS = {
+            name: value
+            for name in dir(module)
+            if isinstance(value := getattr(module, name), type)
+            and issubclass(value, BaseException)
+        }
     return _PARSEHUB_ERRORS
 
 
@@ -145,16 +146,15 @@ def _classify(exc: BaseException) -> ErrorKind:
         失败性质。
     """
     classes = _parsehub_errors()
-    if classes:
-        if isinstance(exc, classes.get("UnknownPlatform", ())):
-            return ErrorKind.UNSUPPORTED
-        if isinstance(exc, classes.get("ContentUnavailableError", ())):
-            return ErrorKind.UNAVAILABLE
-        if isinstance(exc, classes.get("DownloadError", ())):
-            return ErrorKind.NETWORK
-        if isinstance(exc, classes.get("ParseError", ())):
-            return ErrorKind.PARSE
-    # parsehub 不可用时（或异常被包装过）退回类名 / 文案判断。
+    if isinstance(exc, classes.get("UnknownPlatform", ())):
+        return ErrorKind.UNSUPPORTED
+    if isinstance(exc, classes.get("ContentUnavailableError", ())):
+        return ErrorKind.UNAVAILABLE
+    if isinstance(exc, classes.get("DownloadError", ())):
+        return ErrorKind.NETWORK
+    if isinstance(exc, classes.get("ParseError", ())):
+        return ErrorKind.PARSE
+    # 异常被包装过时退回类名 / 文案判断。
     name = type(exc).__name__
     if "UnknownPlatform" in name:
         return ErrorKind.UNSUPPORTED
@@ -182,24 +182,6 @@ def translate(exc: BaseException) -> ParseFailure:
     kind = _classify(exc)
     if isinstance(exc, TimeoutError):
         kind = ErrorKind.TIMEOUT
-    elif kind is ErrorKind.UNKNOWN:
-        try:
-            import httpx
-        except ImportError:  # pragma: no cover - httpx 是硬依赖
-            pass
-        else:
-            if isinstance(exc, httpx.HTTPError):
-                kind = ErrorKind.NETWORK
+    elif kind is ErrorKind.UNKNOWN and isinstance(exc, httpx.HTTPError):
+        kind = ErrorKind.NETWORK
     return ParseFailure(kind, short_error(exc), exc)
-
-
-def is_unavailable(exc: BaseException) -> bool:
-    """这个失败是不是「作品已不可用（被删 / 下架）」。
-
-    Args:
-        exc: 捕获到的异常。
-
-    Returns:
-        作品不可用时返回 True。
-    """
-    return translate(exc).kind is ErrorKind.UNAVAILABLE

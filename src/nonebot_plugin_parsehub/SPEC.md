@@ -16,10 +16,13 @@ tags: [nonebot, parsehub, module]
 
 ## Boundary
 
-- **允许依赖**：nonebot2、onebot v11 适配器、parsehub、Pillow、httpx、localstore。
+- **允许依赖**：nonebot2、onebot v11 适配器、parsehub、Pillow、httpx、localstore、
+  numpy、opencv-python-headless（后两者只在 `card` 里用）。
 - **禁止**：`triggers` 之外的模块 import matcher / `on_command`；`delivery` 之外的模块
-  调用 `sender.send`；`service` import `Bot`；`card`、`cache`、`dedupe`、`relay`、
-  `keys`、`platforms`、`budget`、`media` import nonebot（`card` 只允许 Pillow/httpx）。
+  调用 `sender.send`；`service` import `Bot`。
+- **日志**：一律用 `nonebot.logger`（官方指导），领域模块也不例外；除 logger 之外，
+  `cache`、`dedupe`、`relay`、`keys`、`platforms`、`budget`、`media`、`card` 不碰
+  nonebot 的 matcher / `Bot` / 事件类型。
 - 包内一律相对 import：插件既可能作为已安装包加载，也可能作为本地插件加载。
 
 ## Module map
@@ -63,6 +66,15 @@ tags: [nonebot, parsehub, module]
 - 平台白名单在 `Settings` 里归一成 id 集合，运行期只做集合查找。
 - 配置键是唯一入口：`Config` 只负责读取与校验，运行期一律用 `Settings`，
   不再散读 `plugin_config`。
+- 命令严格按 `COMMAND_START` 匹配：`should_auto` 不排除命令文本，靠命令匹配器的
+  `priority=10` + `block=True` 先收口。裸写的「解析 <链接>」不是命令，按普通消息
+  自动解析——默认前缀只有 `/`，若自动规则也跳过它，消息会被静默丢弃。
+- `paths` 把 localstore 当硬依赖（`require` 后 import），不保留临时目录兜底。
+- 日志统一用 `nonebot.logger`：框架的 loguru 已经管住格式、插件标签与 `LOG_LEVEL`，
+  在包内再桥接一层 stdlib logging 只是多一个可能失效的中间层。
+- 第三方依赖全是**硬依赖**：parsehub / Pillow / numpy / opencv / localstore 缺了就是
+  装错了，代码里不写 `except ImportError` 兜底，也不往别的目录写；降级只发生在产品层
+  （卡片→文字、字体→系统字体、体积探测→未知）。
 
 ## Known limitations
 

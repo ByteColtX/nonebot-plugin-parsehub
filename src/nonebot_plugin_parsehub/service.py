@@ -272,7 +272,8 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
 
     budget = Budget(settings.timeout)
     proxy = settings.proxy_for(platform)
-    cookie = platform_cookie(platform, settings.cookie)
+    # cookies.toml 是同步磁盘读，放线程里，别卡住事件循环
+    cookie = await asyncio.to_thread(platform_cookie, platform, settings.cookie)
     logger.debug(f"[parsehub] {platform} 代理={proxy or '直连'}")
 
     started = time.monotonic()

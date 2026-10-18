@@ -20,6 +20,9 @@ dependencies = [
   "nonebot-adapter-onebot>=2.4.6,<3.0.0",
   "nonebot-plugin-localstore>=0.7.4,<1.0.0",
   "nonebot2>=2.5.0,<3.0.0",
+  # 卡片渐变遮罩与视频抽帧是代码里直接 import 的，必须显式声明
+  "numpy>=2.0.0,<3.0.0",
+  "opencv-python-headless>=4.13.0.92",
   "parsehub>=2.3.10,<3.0.0",
   "pillow>=12.1.0,<13.0.0",
   "pydantic>=2.0.0,<3.0.0",
@@ -46,7 +49,7 @@ test = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.10.0"]
+requires = ["uv_build>=0.10.0,<0.14"]
 build-backend = "uv_build"
 
 [tool.nonebot]

@@ -16,7 +16,8 @@ tags: [nonebot, parsehub, card]
 
 ## Boundary
 
-- 只依赖 Pillow、httpx 与包内的 `platforms`；**不 import nonebot**。
+- 只依赖 Pillow、httpx、numpy（渐变遮罩）、`nonebot.logger` 与包内的 `platforms`；
+  视频抽帧另用 opencv（缺了就跳过这一级兜底）。不碰 matcher / `Bot` / 事件类型。
 - 所有渲染是同步阻塞的 CPU 活，调用方必须放进线程池（`CardRenderer` 负责）。
 
 ## Layout

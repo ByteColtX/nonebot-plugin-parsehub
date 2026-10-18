@@ -52,17 +52,6 @@ class Budget:
         """
         return self.remaining <= 0
 
-    def slice(self, cap: float) -> float:
-        """取一段不超过剩余预算的超时时间。
-
-        Args:
-            cap: 这一段最多允许多久（秒）。
-
-        Returns:
-            实际可用的秒数，至少 :data:`_MIN_SLICE_SECONDS`。
-        """
-        return max(_MIN_SLICE_SECONDS, min(cap, self.remaining))
-
     def timeout(self) -> AbstractAsyncContextManager[None]:
         """套在某一段异步调用外面的超时上下文。
 

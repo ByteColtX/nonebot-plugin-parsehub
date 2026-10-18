@@ -12,15 +12,13 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import httpx
-
-logger = logging.getLogger("nonebot_plugin_parsehub.card.fonts")
+from nonebot import logger
 
 _EMOJI_FONT: Path | None = None
 _GLYPH_CACHE: dict[tuple[int, str], bool] = {}
@@ -71,8 +69,6 @@ FONT_SOURCES: tuple[FontSource, ...] = (
         HARMONY_REGULAR_SHA256,
     ),
 )
-FONT_URLS: tuple[str, ...] = tuple(source.url for source in FONT_SOURCES)
-
 # 系统里可能已经有这些中文字体，有就直接用，不必下载。
 SYSTEM_FONTS: tuple[str, ...] = (
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -249,9 +245,6 @@ EMOJI_FONT_SOURCES: tuple[FontSource, ...] = (
     # release 资产只有这一个正式地址（jsdelivr 只镜像仓库文件，镜像不了
     # release），所以只有一条源；下不到时按既有逻辑退回「没有 emoji 字体」
 )
-EMOJI_FONT_URLS: tuple[str, ...] = tuple(
-    source.url for source in EMOJI_FONT_SOURCES
-)
 EMOJI_FONT_NAME = "Twemoji-15.0.2.ttf"
 
 
@@ -301,7 +294,7 @@ def ensure_emoji_font(cache_dir: Path, url: str = "") -> Path | None:
 
     Args:
         cache_dir: 插件缓存目录，下载的字体放在这里。
-        url: 自定义字体地址，留空则依次尝试 :data:`EMOJI_FONT_URLS`。
+        url: 自定义字体地址，留空则依次尝试 :data:`EMOJI_FONT_SOURCES`。
 
     Returns:
         字体文件路径；不可用时为 ``None``。
@@ -494,7 +487,7 @@ def ensure_font(cache_dir: Path, url: str = "") -> Path | None:
 
     Args:
         cache_dir: 插件缓存目录，下载的字体放在这里。
-        url: 自定义字体地址，留空则依次尝试 :data:`FONT_URLS`。
+        url: 自定义字体地址，留空则依次尝试 :data:`FONT_SOURCES`。
 
     Returns:
         字体文件路径；不可用时为 ``None``。

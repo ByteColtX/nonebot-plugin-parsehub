@@ -334,18 +334,7 @@ class Delivery:
             本次投递的结果。
         """
         report = MediaReport()
-        limit = self.settings.max_file_bytes
-        items: list[MediaFile] = []
-        for file in files:
-            try:
-                size = file.path.stat().st_size
-            except OSError:
-                report.skipped.append(file)
-                continue
-            if limit and size > limit:
-                report.skipped.append(file)
-                continue
-            items.append(file)
+        items = await asyncio.to_thread(self._filter_by_size, files, report)
 
         if report.skipped:
             # 聚合成一条：多图集里每个超限文件各发一条会把群刷屏。
@@ -372,6 +361,36 @@ class Delivery:
                 if self.settings.fail_notice:
                     await self.send_text(sender, event, self._fail_text(file))
         return report
+
+    def _filter_by_size(
+        self,
+        files: list[MediaFile],
+        report: MediaReport,
+    ) -> list[MediaFile]:
+        """按体积上限过滤，顺手把跳过的记进 ``report``。
+
+        ``stat`` 是磁盘 IO，调用方必须放进线程池。
+
+        Args:
+            files: 待发送的本地媒体。
+            report: 本次投递的结果，``skipped`` 会被就地追加。
+
+        Returns:
+            体积允许发送的媒体。
+        """
+        limit = self.settings.max_file_bytes
+        items: list[MediaFile] = []
+        for file in files:
+            try:
+                size = file.path.stat().st_size
+            except OSError:
+                report.skipped.append(file)
+                continue
+            if limit and size > limit:
+                report.skipped.append(file)
+                continue
+            items.append(file)
+        return items
 
     async def _send_one(
         self,
@@ -462,6 +481,8 @@ class Delivery:
             合并转发成功返回 True；媒体类型不适合转发时返回 False，由调用方改走
             逐条发送。
         """
+        # 昵称要从 .env 里读，是同步磁盘 IO：只算一次，放线程里，别卡事件循环
+        name = await asyncio.to_thread(forward_node_name)
         nodes: list[dict] = []
         for file in files:
             if file.kind is MediaKind.FILE:
@@ -472,7 +493,7 @@ class Delivery:
                     "type": "node",
                     "data": {
                         "uin": str(sender.self_id),
-                        "name": forward_node_name(),
+                        "name": name,
                         "content": [
                             {
                                 "type": str(file.kind),

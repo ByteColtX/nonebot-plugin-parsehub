@@ -220,9 +220,30 @@ async def test_auto_rule_matches_group_link(plugin, instance, triggers):
 
 
 @pytest.mark.asyncio
-async def test_auto_rule_ignores_command(plugin, instance, triggers):
+async def test_auto_rule_treats_bare_parse_as_link(plugin, instance, triggers):
+    """裸写的「解析 <链接>」不是命令，必须退回自动解析。
+
+    ``COMMAND_START`` 默认只有 ``/``：``/解析`` 由命令匹配器（priority 10 +
+    block）先吃掉；裸写若也跳过自动解析，两个匹配器都不管，消息就被静默丢弃。
+    """
     event = make_group_event("解析 https://b23.tv/abcd")
-    assert await triggers.should_auto(instance, event) is False
+    assert await triggers.should_auto(instance, event) is True
+
+
+@pytest.mark.asyncio
+async def test_auto_rule_matches_parse_prefixed_sentence(
+    plugin, instance, triggers
+):
+    """「解析一下 <链接>」同样不是命令，应当自动解析。"""
+    event = make_group_event("解析一下 https://b23.tv/abcd")
+    assert await triggers.should_auto(instance, event) is True
+
+
+def test_commands_run_before_auto_and_block(plugin, matchers) -> None:
+    """自动规则敢不管命令，靠的是命令优先级更高且 block。"""
+    for command in (matchers.parse, matchers.platforms, matchers.switch):
+        assert command.priority < matchers.auto.priority
+        assert command.block is True
 
 
 @pytest.mark.asyncio
@@ -262,14 +283,18 @@ async def test_auto_rule_off(
 # 3. 去重
 # --------------------------------------------------------------------------- #
 def test_dedupe_window(plugin, instance):
-    """同一会话内、窗口内只处理一次；不同链接互不影响。"""
+    """同一会话内、窗口内只处理一次；失败 release 之后能重试。"""
     url = "https://b23.tv/a"
-    assert instance.dedupe.should_skip("group:1", url, 60) is False
-    assert instance.dedupe.should_skip("group:1", url, 60) is True
-    assert (
-        instance.dedupe.should_skip("group:1", "https://b23.tv/b", 60) is False
-    )
-    assert instance.dedupe.should_skip("group:1", url, 0) is False  # 0 = 不去重
+    dedupe = instance.dedupe
+    assert dedupe.claim("group:1", [url], 60) is True
+    assert dedupe.claim("group:1", [url], 60) is False  # 处理中
+    dedupe.release("group:1", [url])
+    assert dedupe.claim("group:1", [url], 60) is True  # 失败后可以重试
+    dedupe.commit("group:1", [url])
+    assert dedupe.seen("group:1", url, 60) is True
+    assert dedupe.claim("group:1", [url], 60) is False  # 窗口内
+    assert dedupe.claim("group:1", ["https://b23.tv/b"], 60) is True
+    assert dedupe.seen("group:1", url, 0) is False  # 0 = 不去重
 
 
 def test_content_key_normalises_platform_ids(plugin, keys):
@@ -310,10 +335,12 @@ def test_content_key_falls_back_to_host_and_path(plugin, keys):
 def test_dedupe_is_per_session(plugin, instance):
     """跨会话不去重：同一个链接换个群 / 私聊照样解析。"""
     url = "https://b23.tv/a"
-    assert instance.dedupe.should_skip("group:1", url, 60) is False
-    assert instance.dedupe.should_skip("group:1", url, 60) is True
-    assert instance.dedupe.should_skip("group:2", url, 60) is False
-    assert instance.dedupe.should_skip("private:20000", url, 60) is False
+    dedupe = instance.dedupe
+    for session in ("group:1", "group:2", "private:20000"):
+        assert dedupe.claim(session, [url], 60) is True
+        dedupe.commit(session, [url])
+        assert dedupe.seen(session, url, 60) is True
+    assert dedupe.claim("group:1", [url], 60) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -360,7 +387,7 @@ async def test_handle_link_sends_text_and_image(
     emojis = [
         kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
     ]
-    assert plugin.REACT_START in emojis, emojis  # 开始时回应
+    assert plugin.feedback.Reaction.START in emojis, emojis  # 开始时回应
     text = bot.sent_texts[0]
     assert "哔哩哔哩" in text and "标题" in text
     assert "https://b23.tv" not in text, "回复里不应该再带原始链接"
@@ -687,7 +714,7 @@ def test_content_unavailable_covers_fallback_variant(plugin, errors, feedback):
     from parsehub.errors import ContentUnavailableFallbackError
 
     exc = ContentUnavailableFallbackError([])
-    assert errors.is_unavailable(exc) is True
+    assert errors.translate(exc).kind is errors.ErrorKind.UNAVAILABLE
     assert (
         feedback.failure_notice(exc) == "这个作品已经不可用了（可能被删了）。"
     )
@@ -808,7 +835,7 @@ async def test_download_failure_after_retries_reports_short_error(
     texts = [text for text in bot.sent_texts if text]
     assert texts == ["下载失败：HTTP错误: 403"], texts
     # 下载失败也要给终点状态：先点「收到」，失败时补失败表情
-    assert plugin.REACT_FAIL in _emojis(bot), bot.calls
+    assert plugin.feedback.Reaction.FAIL in _emojis(bot), bot.calls
 
 
 @pytest.mark.asyncio
@@ -918,7 +945,7 @@ async def test_handle_link_multi_media_uses_forward(
     emojis = [
         kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
     ]
-    assert plugin.REACT_OK in emojis, emojis
+    assert plugin.feedback.Reaction.OK in emojis, emojis
 
 
 @pytest.mark.asyncio
@@ -1053,7 +1080,7 @@ async def test_handle_link_video_failure_does_not_fallback(
     emojis = [
         kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
     ]
-    assert plugin.REACT_FAIL in emojis, emojis  # 失败要回应失败表情
+    assert plugin.feedback.Reaction.FAIL in emojis, emojis  # 失败要回应失败表情
 
 
 @pytest.mark.asyncio
@@ -1093,7 +1120,7 @@ async def test_handle_link_skips_oversized_media(
     assert any("超过上限" in t for t in bot.sent_texts), bot.sent_texts
     assert "upload_group_file" not in [api for api, _ in bot.calls]
     # 全被挡掉也要给终点状态：失败表情
-    assert plugin.REACT_FAIL in _emojis(bot), bot.calls
+    assert plugin.feedback.Reaction.FAIL in _emojis(bot), bot.calls
 
 
 @pytest.mark.asyncio
@@ -1121,7 +1148,9 @@ async def test_handle_link_text_only_result(
         "send_msg"
     ) == 1  # 只有文字，没有媒体
     assert "一篇长文" in bot.sent_texts[0]
-    assert plugin.REACT_OK in _emojis(bot), bot.calls  # 纯文字帖也算处理成功
+    assert plugin.feedback.Reaction.OK in _emojis(bot), (
+        bot.calls
+    )  # 纯文字帖也算处理成功
 
 
 @pytest.mark.asyncio
@@ -1174,7 +1203,7 @@ async def test_handle_link_parse_error_manual(
     emojis = [
         kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
     ]
-    assert plugin.REACT_START in emojis, emojis
+    assert plugin.feedback.Reaction.START in emojis, emojis
 
 
 # --------------------------------------------------------------------------- #
@@ -1303,7 +1332,7 @@ async def test_parse_failure_reacts_fail_without_text(
         "https://b23.tv/abcd",
     )
 
-    assert plugin.REACT_FAIL in _emojis(bot), bot.calls
+    assert plugin.feedback.Reaction.FAIL in _emojis(bot), bot.calls
     assert [api for api, _ in bot.calls if api == "send_msg"] == [], (
         bot.sent_texts
     )
@@ -1330,7 +1359,7 @@ async def test_content_unavailable_gets_notice(
     url = "https://v.douyin.com/kE-zqatAP7M/"
     await service.handle(instance, bot, make_group_event(url), url)
 
-    assert plugin.REACT_FAIL in _emojis(bot), bot.calls
+    assert plugin.feedback.Reaction.FAIL in _emojis(bot), bot.calls
     assert any("不可用" in text for text in bot.sent_texts), bot.sent_texts
 
 

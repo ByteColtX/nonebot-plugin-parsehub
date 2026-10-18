@@ -157,7 +157,7 @@ def test_alias_key_points_to_same_files(tmp_path: Path, cache) -> None:
         item.stat().st_size for item in primary.rglob("*") if item.is_file()
     )
     assert store.total_bytes() == only_primary
-    assert sorted(store.entry_keys(primary)) == [
+    assert sorted(alias.keys) == [
         "b23.tv_3xdwepo",
         "bilibili:bv1",
     ]
@@ -169,11 +169,15 @@ def test_remember_key_appends(tmp_path: Path, cache) -> None:
     entry = store.store(["short"], _files(tmp_path, "a.jpg"))
     assert entry is not None
 
+    def meta_keys() -> list[str]:
+        raw = (entry / cache.META_NAME).read_text("utf-8")
+        return sorted(json.loads(raw)["keys"])
+
     store.remember_key(entry, "full")
-    assert sorted(store.entry_keys(entry)) == ["full", "short"]
+    assert meta_keys() == ["full", "short"]
     # 重复补记不会写两遍
     store.remember_key(entry, "full")
-    assert sorted(store.entry_keys(entry)) == ["full", "short"]
+    assert meta_keys() == ["full", "short"]
 
 
 def test_corrupt_meta_is_miss(tmp_path: Path, cache) -> None:

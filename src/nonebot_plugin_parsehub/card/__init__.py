@@ -16,10 +16,11 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from nonebot import logger
 
 from ..platforms import PLATFORMS
 from . import cover, fonts, layout
@@ -95,8 +96,6 @@ __all__ = [
     "video_seconds",
     "wrap",
 ]
-
-logger = logging.getLogger("nonebot_plugin_parsehub.card")
 
 
 class CardRenderer:

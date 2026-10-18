@@ -61,7 +61,11 @@ async def test_auto_matcher_parses_group_link(
         ctx.should_pass_rule()
         ctx.should_call_api(
             "set_msg_emoji_like",
-            {"message_id": 1, "emoji_id": plugin.REACT_START, "set": True},
+            {
+                "message_id": 1,
+                "emoji_id": plugin.feedback.Reaction.START,
+                "set": True,
+            },
             result=None,
         )
         ctx.should_call_send(
@@ -69,7 +73,11 @@ async def test_auto_matcher_parses_group_link(
         )
         ctx.should_call_api(
             "set_msg_emoji_like",
-            {"message_id": 1, "emoji_id": plugin.REACT_OK, "set": True},
+            {
+                "message_id": 1,
+                "emoji_id": plugin.feedback.Reaction.OK,
+                "set": True,
+            },
             result=None,
         )
         ctx.should_finished()
@@ -105,7 +113,11 @@ async def test_command_matcher_in_private(
         ctx.receive_event(bot, event)
         ctx.should_call_api(
             "set_msg_emoji_like",
-            {"message_id": 3, "emoji_id": plugin.REACT_START, "set": True},
+            {
+                "message_id": 3,
+                "emoji_id": plugin.feedback.Reaction.START,
+                "set": True,
+            },
             result=None,
         )
         ctx.should_call_send(
@@ -113,7 +125,11 @@ async def test_command_matcher_in_private(
         )
         ctx.should_call_api(
             "set_msg_emoji_like",
-            {"message_id": 3, "emoji_id": plugin.REACT_OK, "set": True},
+            {
+                "message_id": 3,
+                "emoji_id": plugin.feedback.Reaction.OK,
+                "set": True,
+            },
             result=None,
         )
         ctx.should_finished()
@@ -133,7 +149,11 @@ async def test_unsupported_link_gives_feedback(
         ctx.receive_event(bot, event)
         ctx.should_call_api(
             "set_msg_emoji_like",
-            {"message_id": 4, "emoji_id": plugin.REACT_START, "set": True},
+            {
+                "message_id": 4,
+                "emoji_id": plugin.feedback.Reaction.START,
+                "set": True,
+            },
             result=None,
         )
         ctx.should_call_send(
@@ -141,7 +161,11 @@ async def test_unsupported_link_gives_feedback(
         )
         ctx.should_call_api(
             "set_msg_emoji_like",
-            {"message_id": 4, "emoji_id": plugin.REACT_FAIL, "set": True},
+            {
+                "message_id": 4,
+                "emoji_id": plugin.feedback.Reaction.FAIL,
+                "set": True,
+            },
             result=None,
         )
         ctx.should_finished()

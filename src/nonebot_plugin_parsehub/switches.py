@@ -7,7 +7,7 @@
 新群、新私聊也不需要任何初始化。
 
 状态存成 JSON，写的时候先写临时文件再 ``os.replace``，避免进程被杀的瞬间留下半
-个文件。模块本身不依赖 nonebot，方便单独测试。
+个文件。除 ``nonebot.logger`` 外不依赖 nonebot，方便单独测试。
 
 用法::
 
@@ -21,12 +21,11 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
+import threading
 from pathlib import Path
 
-logger = logging.getLogger("nonebot_plugin_parsehub.switches")
-
+from nonebot import logger
 
 # 没有记录时的默认值：群和私聊一样，都是允许解析。
 DEFAULT_ON = True
@@ -77,6 +76,9 @@ class SwitchStore:
         self.path = path
         self.default = default
         self._state: dict[str, bool] = {}
+        # ``set`` 现在跑在线程池里：两个群同时改开关时既会抢同一个 ``*.tmp``，
+        # 也会在 ``json.dumps`` 遍历 ``_state`` 时撞上另一个线程的写入。
+        self._lock = threading.RLock()
         self.load()
 
     def load(self) -> None:
@@ -106,18 +108,23 @@ class SwitchStore:
         self._state = {str(key): bool(value) for key, value in sessions.items()}
 
     def save(self) -> None:
-        """原子写盘（先写 ``*.tmp`` 再 rename）。"""
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_name(self.path.name + ".tmp")
-            payload = {"schema": SCHEMA, "sessions": self._state}
-            tmp.write_text(
-                json.dumps(payload, ensure_ascii=False, sort_keys=True),
-                "utf-8",
-            )
-            os.replace(tmp, self.path)
-        except OSError as exc:
-            logger.warning(f"[parsehub] 解析开关写盘失败: {exc}")
+        """原子写盘（先写 ``*.tmp`` 再 rename）。
+
+        调用方可能来自线程池，所以整个「拼 JSON → 写 tmp → rename」都在锁里，
+        否则两路写入会抢同一个 tmp 文件、或者撞上遍历中的字典。
+        """
+        with self._lock:
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = self.path.with_name(self.path.name + ".tmp")
+                payload = {"schema": SCHEMA, "sessions": self._state}
+                tmp.write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                    "utf-8",
+                )
+                os.replace(tmp, self.path)
+            except OSError as exc:
+                logger.warning(f"[parsehub] 解析开关写盘失败: {exc}")
 
     def is_on(self, key: str) -> bool:
         """这个会话允不允许解析。
@@ -140,28 +147,10 @@ class SwitchStore:
         Returns:
             设置之后的值。
         """
-        if on == self.default:
-            self._state.pop(key, None)  # 和默认值一样就不留记录
-        else:
-            self._state[key] = on
-        self.save()
+        with self._lock:
+            if on == self.default:
+                self._state.pop(key, None)  # 和默认值一样就不留记录
+            else:
+                self._state[key] = on
+            self.save()
         return on
-
-    def toggle(self, key: str) -> bool:
-        """翻转开关。
-
-        Args:
-            key: 会话键。
-
-        Returns:
-            翻转之后的值。
-        """
-        return self.set(key, not self.is_on(key))
-
-    def off_keys(self) -> list[str]:
-        """所有被关掉的会话键（按字母序）。
-
-        Returns:
-            会话键列表。
-        """
-        return sorted(key for key, on in self._state.items() if not on)

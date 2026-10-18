@@ -58,32 +58,6 @@ class Dedupe:
         last_seen = self._seen.get((session, key))
         return last_seen is not None and time.time() - last_seen < window
 
-    # ---- 旧式「看到即记」（手动路径之外的兼容入口）----
-
-    def mark(self, session: str, key: str) -> None:
-        """记下这个会话里该 key 刚被处理过。
-
-        Args:
-            session: 会话标识。
-            key: 作品 key。
-        """
-        self._seen[(session, key)] = time.time()
-
-    def should_skip(self, session: str, key: str, window: int) -> bool:
-        """查一下并顺手记上（「处理过了」的语义）。
-
-        Args:
-            session: 会话标识。
-            key: 作品 key。
-            window: 去重窗口（秒）。
-
-        Returns:
-            窗口内重复出现返回 True。
-        """
-        repeated = self.seen(session, key, window)
-        self.mark(session, key)
-        return repeated
-
     # ---- claim / commit / release ----
 
     def claim(self, session: str, keys: Iterable[str], window: int) -> bool:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -224,6 +225,15 @@ def test_cache_lives_outside_relay_root(instance) -> None:
     assert cache_root != relay_root
     assert not cache_root.is_relative_to(relay_root)
     assert not relay_root.is_relative_to(cache_root)
+
+
+def test_plugin_dirs_come_from_localstore(plugin) -> None:
+    """目录必须由 localstore 给出：不自己拼，也不退回系统临时目录。"""
+    temp = Path(tempfile.gettempdir()).resolve()
+    for path in (plugin.paths.cache_root(), plugin.paths.data_root()):
+        resolved = path.resolve()
+        assert resolved.name == "nonebot_plugin_parsehub", resolved
+        assert not resolved.is_relative_to(temp), resolved
 
 
 async def test_cache_stores_only_sent_media(
