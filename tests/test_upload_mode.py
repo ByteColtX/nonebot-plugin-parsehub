@@ -1,4 +1,4 @@
-"""上传模式：http 走中转地址，base64 把文件内容内联进消息段。
+"""上传模式：file 给本机路径，http 给中转地址，base64 把内容内联进消息段。
 
 uv run pytest -q tests/test_upload_mode.py
 """
@@ -6,6 +6,7 @@ uv run pytest -q tests/test_upload_mode.py
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -44,10 +45,12 @@ def upload_mode(plugin, monkeypatch):
     return _set
 
 
-def _inline_bytes(ref: str) -> bytes:
-    """从 ``base64://`` 引用里取回原始字节。"""
-    assert ref.startswith("base64://"), ref[:32]
-    return base64.b64decode(ref[len("base64://") :])
+def _expected_ref(path: Path, mode: str) -> str:
+    """非 http 模式下协议端应该收到的引用。"""
+    if mode == "base64":
+        data = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"base64://{data}"
+    return path.resolve().as_uri()
 
 
 def _sent_segments(bot: RecordingBot, api: str = "send_msg") -> list:
@@ -60,11 +63,16 @@ def _sent_segments(bot: RecordingBot, api: str = "send_msg") -> list:
     ]
 
 
+def test_default_upload_mode_is_file(plugin):
+    """默认值就是 file：同机部署零配置即可用，不占端口。"""
+    assert plugin.Config().parsehub_upload_mode == "file"
+
+
 @pytest.mark.asyncio
 async def test_media_ref_http_mode_points_at_relay(
     plugin, tmp_media, upload_mode
 ):
-    """http 模式仍然给协议端中转地址，行为和改动前一致。"""
+    """http 模式仍然给协议端中转地址。"""
     upload_mode("http")
     sub = tmp_media / "abc123"
     sub.mkdir()
@@ -75,24 +83,27 @@ async def test_media_ref_http_mode_points_at_relay(
     assert ref == "http://127.0.0.1:18899/abc123/a.jpg"
 
 
+@pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_media_ref_base64_mode_inlines_bytes(
-    plugin, tmp_media, upload_mode
-):
-    """base64 模式把文件内容内联，协议端不需要能访问本机。"""
-    upload_mode("base64")
+async def test_media_ref_follows_mode(plugin, tmp_media, upload_mode, mode):
+    """file 给本机路径，base64 给内联内容。"""
+    upload_mode(mode)
     sub = tmp_media / "abc123"
     sub.mkdir()
     media = sub / "a.jpg"
     media.write_bytes(b"hello")
 
-    assert _inline_bytes(await plugin._media_ref(media)) == b"hello"
+    ref = await plugin._media_ref(media)
+    assert ref == _expected_ref(media, mode)
+    if mode == "file":
+        assert ref.startswith("file:///")
 
 
+@pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_single_image_uses_inline_base64(plugin, tmp_media, upload_mode):
-    """单张图片走消息段时，file 是 base64:// 而不是 http 地址。"""
-    upload_mode("base64")
+async def test_single_image_follows_mode(plugin, tmp_media, upload_mode, mode):
+    """单张图片走消息段时按模式给引用。"""
+    upload_mode(mode)
     image = tmp_media / "a.jpg"
     image.write_bytes(b"img")
 
@@ -101,13 +112,14 @@ async def test_single_image_uses_inline_base64(plugin, tmp_media, upload_mode):
 
     segments = _sent_segments(bot)
     assert [segment.type for segment in segments] == ["image"]
-    assert _inline_bytes(segments[0].data["file"]) == b"img"
+    assert segments[0].data["file"] == _expected_ref(image, mode)
 
 
+@pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_single_video_uses_inline_base64(plugin, tmp_media, upload_mode):
-    """单个视频走消息段时同样内联。"""
-    upload_mode("base64")
+async def test_single_video_follows_mode(plugin, tmp_media, upload_mode, mode):
+    """单个视频走消息段时同样按模式给引用。"""
+    upload_mode(mode)
     video = tmp_media / "b.mp4"
     video.write_bytes(b"vid")
 
@@ -116,10 +128,10 @@ async def test_single_video_uses_inline_base64(plugin, tmp_media, upload_mode):
 
     segments = _sent_segments(bot)
     assert [segment.type for segment in segments] == ["video"]
-    assert _inline_bytes(segments[0].data["file"]) == b"vid"
+    assert segments[0].data["file"] == _expected_ref(video, mode)
 
 
-@pytest.mark.parametrize("mode", ["http", "base64"])
+@pytest.mark.parametrize("mode", ["file", "http", "base64"])
 @pytest.mark.asyncio
 async def test_unknown_extension_goes_through_group_file(
     plugin, tmp_media, upload_mode, mode
@@ -134,16 +146,17 @@ async def test_unknown_extension_goes_through_group_file(
 
     uploads = [kw for api, kw in bot.calls if api == "upload_group_file"]
     assert len(uploads) == 1
-    if mode == "base64":
-        assert _inline_bytes(uploads[0]["file"]) == b"bin"
-    else:
+    if mode == "http":
         assert uploads[0]["file"] == "http://127.0.0.1:18899/a.bin"
+    else:
+        assert uploads[0]["file"] == _expected_ref(media, mode)
 
 
+@pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_forward_nodes_use_inline_base64(plugin, tmp_media, upload_mode):
-    """合并转发的每个节点也内联 base64。"""
-    upload_mode("base64")
+async def test_forward_nodes_follow_mode(plugin, tmp_media, upload_mode, mode):
+    """合并转发的每个节点也按模式给引用。"""
+    upload_mode(mode)
     first = tmp_media / "a.jpg"
     first.write_bytes(b"one")
     second = tmp_media / "b.jpg"
@@ -160,15 +173,16 @@ async def test_forward_nodes_use_inline_base64(plugin, tmp_media, upload_mode):
         node["data"]["content"][0]["data"]["file"]
         for node in calls[0]["messages"]
     ]
-    assert [_inline_bytes(ref) for ref in refs] == [b"one", b"two"]
+    assert refs == [_expected_ref(first, mode), _expected_ref(second, mode)]
 
 
+@pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_card_image_uses_inline_base64(
-    plugin, tmp_media, upload_mode, monkeypatch
+async def test_card_image_follows_mode(
+    plugin, tmp_media, upload_mode, monkeypatch, mode
 ):
-    """卡片图也内联，走的是同一个入口。"""
-    upload_mode("base64")
+    """卡片图也走同一个入口。"""
+    upload_mode(mode)
     card_path = tmp_media / "card.jpg"
     card_path.write_bytes(b"card")
 
@@ -190,13 +204,14 @@ async def test_card_image_uses_inline_base64(
 
     assert info.sent
     segments = _sent_segments(bot)
-    assert _inline_bytes(segments[0].data["file"]) == b"card"
+    assert segments[0].data["file"] == _expected_ref(card_path, mode)
 
 
+@pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_cached_card_uses_inline_base64(plugin, tmp_media, upload_mode):
+async def test_cached_card_follows_mode(plugin, tmp_media, upload_mode, mode):
     """命中缓存时发的卡片图同样跟着模式走。"""
-    upload_mode("base64")
+    upload_mode(mode)
     entry = tmp_media / "entry"
     (entry / "files").mkdir(parents=True)
     (entry / "files" / "a.jpg").write_bytes(b"media")
@@ -208,18 +223,20 @@ async def test_cached_card_uses_inline_base64(plugin, tmp_media, upload_mode):
     )
 
     segments = _sent_segments(bot)
-    assert _inline_bytes(segments[0].data["file"]) == b"cached-card"
+    card_path = entry / "card.jpg"
+    assert segments[0].data["file"] == _expected_ref(card_path, mode)
 
 
+@pytest.mark.parametrize("mode", ["file", "base64"])
 @pytest.mark.asyncio
-async def test_base64_mode_does_not_start_relay(
-    plugin, monkeypatch, upload_mode
+async def test_non_http_mode_does_not_start_relay(
+    plugin, monkeypatch, upload_mode, mode
 ):
-    """base64 模式不占端口：启动钩子不应该启动中转服务。"""
-    upload_mode("base64")
+    """file / base64 都不占端口：启动钩子不应该启动中转服务。"""
+    upload_mode(mode)
 
     def boom(*args, **kwargs):
-        raise AssertionError("base64 模式不应该启动中转服务")
+        raise AssertionError(f"{mode} 模式不应该启动中转服务")
 
     monkeypatch.setattr(plugin.server.RELAY, "start", boom)
 

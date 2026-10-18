@@ -57,9 +57,11 @@ class Config(BaseModel):
             （实测超过 nonebot 默认的 30 秒上限被掐断）。这里给足余量，
             真超时了才退回逐条发送。
         parsehub_fail_notice: 视频发送失败时是否额外发一条文字提示。
-        parsehub_upload_mode: 媒体交给协议端的方式。``http`` 走内置只读 HTTP
-            服务、发地址让协议端自己来拉；``base64`` 把文件内容内联进消息段，
-            不启动中转服务、不占端口，代价是请求体大约 1/3 且大文件更容易被拒。
+        parsehub_upload_mode: 媒体交给协议端的方式。``file``（默认）直接发本机
+            ``file://`` 路径，要求协议端与机器人同机、能读同一路径；``http`` 走
+            内置只读 HTTP 服务，发地址让协议端自己来拉，协议端在另一台机器上时
+            用这个；``base64`` 把文件内容内联进消息段，不占端口，代价是请求体
+            大约 1/3 且大文件更容易被拒。
         parsehub_files_host: 媒体中转服务对外的地址，留空则自动探测内网 IP。
             只在 ``parsehub_upload_mode=http`` 时生效。
         parsehub_files_port: 媒体中转服务的端口，同样只在 http 模式下生效。
@@ -95,7 +97,7 @@ class Config(BaseModel):
     parsehub_fail_notice: bool = True
 
     # ---- 媒体交给协议端的方式 ----
-    parsehub_upload_mode: Literal["http", "base64"] = "http"
+    parsehub_upload_mode: Literal["file", "http", "base64"] = "file"
 
     # ---- 媒体中转服务 ----
     parsehub_files_host: str = ""

@@ -11,8 +11,8 @@
 1. 收到链接立刻给原消息点一个表情回应（不等解析结果）；
 2. 解析出平台、标题、正文和媒体直链；
 3. 下载媒体到本机临时目录，再按 ``PARSEHUB_UPLOAD_MODE`` 交给协议端：
-   ``http`` 模式用内置只读 HTTP 服务发地址让协议端自己拉，``base64`` 模式把
-   文件内容内联进消息段；
+   ``file``（默认）直接发本机路径，``http`` 模式用内置只读 HTTP 服务发地址让
+   协议端自己拉，``base64`` 模式把文件内容内联进消息段；
 4. 媒体多于一个时合并转发，否则逐条发送；一个作品最多发 20 个媒体，多出来的
    不发（图集动辄上百张，全发会把协议端拖到超时）。
 
@@ -435,8 +435,10 @@ async def _react(bot: Bot, event: MessageEvent, emoji_id: str) -> None:
 async def _media_ref(path: Path) -> str:
     """把本地文件变成协议端能取到的引用。
 
-    ``http`` 模式返回中转服务的地址，让协议端自己来拉；``base64`` 模式把文件内容
-    内联进消息段（OneBot v11 的 ``base64://`` 写法），协议端不需要能访问本机。
+    ``file`` 模式直接给本机路径（要求协议端与机器人同机、能读同一路径）；
+    ``http`` 模式返回中转服务的地址，让协议端自己来拉；``base64`` 模式把文件
+    内容内联进消息段（OneBot v11 的 ``base64://`` 写法），协议端不需要能访问
+    本机。
 
     Args:
         path: 本地媒体文件路径。
@@ -444,9 +446,13 @@ async def _media_ref(path: Path) -> str:
     Returns:
         可直接赋给消息段 ``file`` 字段的字符串。
     """
-    if plugin_config.parsehub_upload_mode == "base64":
+    mode = plugin_config.parsehub_upload_mode
+    if mode == "base64":
         # 读整份文件 + 编码是纯 CPU/IO 活，放线程池里，不阻塞事件循环
         return await asyncio.to_thread(_to_base64, path)
+    if mode == "file":
+        # as_uri() 生成规范里的 file:// 写法，顺带处理 Windows 盘符与转义字符
+        return path.resolve().as_uri()
     return server.RELAY.url_for(path, _ENDPOINT.host, _ENDPOINT.port)
 
 
@@ -1574,7 +1580,8 @@ async def _on_startup() -> None:
         )
     else:
         logger.info(
-            "[parsehub] 媒体上传走 base64，中转服务未启动（不占端口）；"
+            f"[parsehub] 媒体上传走 {cfg.parsehub_upload_mode}，"
+            "中转服务未启动（不占端口）；"
             f"根目录: {server.RELAY.root}"
         )
     if cfg.parsehub_card and cfg.parsehub_card_font:

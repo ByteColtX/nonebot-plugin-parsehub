@@ -354,7 +354,9 @@ async def test_handle_link_sends_text_and_image(
         for api, kw in bot.calls
         if api == "send_msg" and kw["message"][0].type == "image"
     )
-    assert image_call[0].data["file"].startswith("http://127.0.0.1:18899/")
+    # 默认上传模式是 file：同机部署直接给协议端本机路径
+    assert image_call[0].data["file"].startswith("file:///")
+    assert image_call[0].data["file"].endswith("/pic.jpg")
 
 
 @pytest.mark.asyncio
