@@ -59,6 +59,10 @@ jobs:
 
       - name: 把构建产物挂到 Release
         if: startsWith(github.ref, 'refs/tags/')
-        run: gh release upload --clobber "${GITHUB_REF#refs/tags/}" dist/*.tar.gz dist/*.whl
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          # 首次发布还没有 Release 对象，先建再传
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --generate-notes
+          gh release upload --clobber "$tag" dist/*.tar.gz dist/*.whl
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
