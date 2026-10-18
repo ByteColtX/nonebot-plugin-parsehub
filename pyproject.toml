@@ -54,6 +54,10 @@ plugins = ["nonebot_plugin_parsehub"]
 
 [tool.poe.tasks]
 test = "pytest -q"
+lint = "ruff check ."
+fmt = "ruff format --check ."
+# CI 同款：检查 + 格式 + 测试，本地提交前跑这一个就够
+check = ["lint", "fmt", "test"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

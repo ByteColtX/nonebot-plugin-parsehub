@@ -12,6 +12,9 @@ on:
       - "pyproject.toml"
       - ".github/workflows/**"
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test (${{ matrix.python-version }})
