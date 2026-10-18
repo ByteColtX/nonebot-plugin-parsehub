@@ -83,6 +83,15 @@ def download_failed_notice(exc: BaseException) -> str:
     return f"下载失败：{short_error(exc)}"
 
 
+def internal_error_notice() -> str:
+    """插件内部异常时的兜底提示。
+
+    Returns:
+        提示文案。
+    """
+    return "处理这个链接时出错了，稍后再试。"
+
+
 def unsupported_notice() -> str:
     """链接没有对应解析器时的提示。
 

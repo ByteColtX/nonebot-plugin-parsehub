@@ -108,15 +108,16 @@ class App:
             RuntimeError: ``http`` 模式下中转服务起不来（端口被占/地址不可用）。
         """
         if self.settings.delivery_mode == "http":
-            bind_host = self.settings.relay_host or "0.0.0.0"
+            # 绑定所有网卡；PARSEHUB_RELAY_HOST 只是「告诉协议端来这个地址」，
+            # 允许填公网域名 / NAT 地址，不能拿来当 bind 地址。
             try:
                 self.endpoint.port = self.relay.start(
-                    bind_host, self.settings.relay_port
+                    "0.0.0.0", self.settings.relay_port
                 )
             except OSError as exc:
                 raise RuntimeError(
                     "[parsehub] 媒体中转服务启动失败"
-                    f"（{bind_host}:{self.settings.relay_port}）：{exc}。"
+                    f"（0.0.0.0:{self.settings.relay_port}）：{exc}。"
                     "请换端口或改用 PARSEHUB_DELIVERY=file。"
                 ) from exc
             self.endpoint.host = self.settings.relay_host or guess_lan_ip()
@@ -146,9 +147,11 @@ class App:
         self._tasks.append(asyncio.create_task(self._sweep_forever()))
 
     async def shutdown(self) -> None:
-        """关闭钩子：取消后台任务。"""
+        """关闭钩子：取消并等待后台任务结束。"""
         for task in self._tasks:
             task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
 
     async def _warm(self) -> None:

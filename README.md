@@ -143,7 +143,8 @@ plugins = ["nonebot_plugin_parsehub"]
 - 投递三选一、**互不兜底**：`file` 发本机路径（协议端同机）/ `http` 发中转地址（跨机）/ `base64` 内容内联（请求体约 +1/3）
 - **从旧版本升级**：`PARSEHUB_UPLOAD_MODE` 改名 `PARSEHUB_DELIVERY` 且默认值改为 `file`；
   `MAX_MB` / `CACHE_HOURS` / `KEEP_MINUTES` / `FILES_HOST` / `FILES_PORT` 一并改名（见上表）。
-  旧键不会被读取；协议端不在本机时务必设 `PARSEHUB_DELIVERY=http`
+  旧键不会被读取；协议端不在本机时务必设 `PARSEHUB_DELIVERY=http`。
+  旧版 `sessions.json`（平铺格式）也会被忽略，开关回到默认值
 - parsehub 全程同步阻塞，插件把所有调用放进 `asyncio.to_thread`；首次导入懒加载，不影响启动
 - 卡片用 Pillow 画，封面三级兜底（`thumb_url` → 图片媒体 → 视频抽帧），没装 Pillow 或没有中文字体时自动退回文字；
   字体优先 `PARSEHUB_CARD_FONT` → 缓存目录 → 系统字体 → 下载（sha256 校验），缺字用回退字体补，emoji 用 Twemoji 位图字体

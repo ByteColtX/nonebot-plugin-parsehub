@@ -60,6 +60,9 @@ triggers ──► service ──► parsehub_client
 `file`（默认，本机 `file://` 路径）/ `http`（中转地址）/ `base64`（内容内联）。
 三者**互不兜底**：选了哪种就是哪种，发不出去就点失败表情并提示。
 
+`http` 模式固定绑定 `0.0.0.0`；`PARSEHUB_RELAY_HOST` 只是告诉协议端「来这个地址」，
+可以是内网 IP 或公网域名，不参与 bind。
+
 ## Known limitations
 
 - parsehub 是同步库，线程无法取消：下载超时后那次下载仍会跑完，只是不再重试。

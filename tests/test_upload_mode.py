@@ -308,3 +308,27 @@ async def test_http_mode_starts_relay(
     await instance.startup()
     assert started == [("0.0.0.0", instance.settings.relay_port)]
     assert instance.endpoint.host == "10.0.0.2"
+
+
+@pytest.mark.asyncio
+async def test_relay_host_is_advertised_not_bound(
+    plugin, monkeypatch, instance, update_settings
+):
+    """PARSEHUB_RELAY_HOST 只决定对外地址，不能拿来当 bind 地址（可能是域名）。"""
+    update_settings(delivery_mode="http", relay_host="media.example.com")
+    started: list[tuple[str, int]] = []
+
+    def fake_start(host, port):
+        started.append((host, port))
+        return 18899
+
+    monkeypatch.setattr(instance.relay, "start", fake_start)
+
+    async def noop() -> None:
+        return
+
+    monkeypatch.setattr(instance, "_sweep_forever", noop)
+
+    await instance.startup()
+    assert started == [("0.0.0.0", instance.settings.relay_port)]
+    assert instance.endpoint.host == "media.example.com"

@@ -173,7 +173,7 @@ class Settings:
             concurrency=cfg.parsehub_concurrency,
             proxy=cfg.parsehub_proxy.strip(),
             proxy_platforms=frozenset(
-                item.strip()
+                item.strip().lower()
                 for item in cfg.parsehub_proxy_platforms
                 if item.strip()
             ),
@@ -224,7 +224,10 @@ class Settings:
         """
         if not self.proxy:
             return ""
-        if self.proxy_platforms and platform_id not in self.proxy_platforms:
+        if (
+            self.proxy_platforms
+            and platform_id.lower() not in self.proxy_platforms
+        ):
             return ""
         return self.proxy
 

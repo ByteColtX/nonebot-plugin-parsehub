@@ -88,6 +88,21 @@ def test_save_creates_parent_dir(tmp_path: Path, switches) -> None:
     assert (tmp_path / "deep" / "nested" / "s.json").exists()
 
 
+def test_schema_version_is_written(tmp_path: Path, switches) -> None:
+    """落盘带 schema 版本，后续改格式时能识别旧文件。"""
+    path = tmp_path / "sessions.json"
+    switches.SwitchStore(path).set(switches.group_key(1), False)
+    assert '"schema": 2' in path.read_text("utf-8")
+
+
+def test_old_flat_format_is_ignored(tmp_path: Path, switches) -> None:
+    """旧版平铺 dict 不迁移，直接按默认值处理。"""
+    path = tmp_path / "sessions.json"
+    path.write_text('{"group:1": false}', "utf-8")
+    store = switches.SwitchStore(path)
+    assert store.is_on(switches.group_key(1)) is True
+
+
 def test_keys_are_namespaced(switches) -> None:
     """群和私聊的键不能撞车。"""
     assert switches.group_key(123) != switches.private_key(123)

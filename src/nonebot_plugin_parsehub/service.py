@@ -62,6 +62,7 @@ class Outcome(StrEnum):
     NO_MEDIA = "no_media"
     DOWNLOAD_FAILED = "download_failed"
     DELIVERY_FAILED = "delivery_failed"
+    INTERNAL_ERROR = "internal_error"
 
 
 # 这些结局算「处理成功」，点成功表情。
@@ -193,9 +194,17 @@ async def handle(
 
     await feedback.react(sender, event, feedback.Reaction.START)
 
-    async with app.semaphore:
-        result = await _deliver(
-            app, sender, event, url, platform, session, pre_key, manual
+    try:
+        async with app.semaphore:
+            result = await _deliver(
+                app, sender, event, url, platform, session, pre_key, manual
+            )
+    except Exception as exc:  # noqa: BLE001 - 兜底：任何路径都要有终点
+        logger.exception(f"[parsehub] 处理 {url} 时出现未预期异常: {exc}")
+        result = Result(
+            Outcome.INTERNAL_ERROR,
+            notice=feedback.internal_error_notice(),
+            keys=(pre_key,),
         )
 
     if result.notice:
@@ -206,8 +215,9 @@ async def handle(
         await feedback.react(sender, event, reaction)
 
     # 手动命令不参与去重：既不拦也不记，和旧行为一致。
+    # 窗口为 0 时 commit 只会让 _seen 无限增长，所以只 release。
     if not manual:
-        if result.ok:
+        if result.ok and settings.dedupe_seconds > 0:
             app.dedupe.commit(session, result.keys)
         else:
             app.dedupe.release(session, result.keys)
@@ -249,7 +259,14 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
     if cached is not None and not _cached_over_limit(cached, app):
         return await _deliver_cached(app, sender, event, cached, pre_key)
 
-    if not await app.client.is_supported(url):
+    try:
+        supported = await app.client.is_supported(url)
+    except Exception as exc:  # noqa: BLE001 - 判断失败就交给解析去报错
+        logger.warning(
+            f"[parsehub] 平台支持判断失败 {url}: {type(exc).__name__}: {exc}"
+        )
+        supported = True
+    if not supported:
         notice = feedback.unsupported_notice() if manual else None
         return Result(Outcome.UNSUPPORTED, notice=notice, keys=(pre_key,))
 

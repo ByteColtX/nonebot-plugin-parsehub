@@ -214,7 +214,7 @@ async def probe_size(
 
             response = await client.get(url, headers={"Range": "bytes=0-0"})
             content_range = response.headers.get("content-range", "")
-    except (httpx.HTTPError, httpx.InvalidURL):
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError):
         return None
 
     tail = content_range.rsplit("/", 1)[-1]
