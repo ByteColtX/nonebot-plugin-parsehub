@@ -31,7 +31,7 @@ logger = logging.getLogger("nonebot_plugin_parsehub.switches")
 # 没有记录时的默认值：群和私聊一样，都是允许解析。
 DEFAULT_ON = True
 
-# 落盘格式版本：只有这个版本会被读取，旧格式直接忽略（不做迁移）。
+# 落盘格式版本：版本不符时按默认值处理。
 SCHEMA = 2
 
 

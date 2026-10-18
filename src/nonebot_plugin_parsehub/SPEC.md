@@ -61,10 +61,10 @@ tags: [nonebot, parsehub, module]
 - 不额外包一层 `domain.Work`：`MediaRef` / `MediaFile` / `CacheEntry` 就是领域模型，
   避免复制 parsehub 的结果对象。
 - 平台白名单在 `Settings` 里归一成 id 集合，运行期只做集合查找。
-- 配置改名不保留旧键（破坏性变更）：`MAX_FILE_MB`、`TASK_TTL_MINUTES`、
-  `RELAY_HOST/PORT`、`DELIVERY`、`CACHE_TTL_HOURS`。
+- 配置键是唯一入口：`Config` 只负责读取与校验，运行期一律用 `Settings`，
+  不再散读 `plugin_config`。
 
 ## Known limitations
 
-- `sessions.json` 只有 schema 2 会被读取，旧文件直接忽略（不迁移）。
+- `sessions.json` 带 schema 版本（当前 2）；版本不符时按默认值处理。
 - 平台白名单里无法表达「除某平台外全部」。
