@@ -31,6 +31,7 @@
 - **体积 / 时长保护 / 去重 / 并发限制 / 临时文件自动清理**（去重只作用于同一会话，跨会话不限制）
 - **时长保护**：视频超过 `PARSEHUB_MAX_SECONDS`（默认 5 分钟）时不下载，只发封面卡片 + 一句「视频太长啦，还是去 xx 看吧」
 - **媒体缓存**：同一作品 24 小时内再出现，直接发本地那份，不再解析下载
+- **上传方式可选**：`PARSEHUB_UPLOAD_MODE=http`（默认，协议端来拉）或 `base64`（内容内联，不占端口）
 
 ## 🎨 效果图
 
@@ -154,8 +155,9 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 | `PARSEHUB_SEND_TEXT` | 否 | `true` | 是否发送标题 / 正文 |
 | `PARSEHUB_MAX_CHARS` | 否 | `300` | 正文最多发送多少字符 |
 | `PARSEHUB_FAIL_NOTICE` | 否 | `true` | 视频发送失败时是否额外发文字提示 |
-| `PARSEHUB_FILES_HOST` | 否 | 无 | 媒体中转服务对外地址，留空自动探测内网 IP |
-| `PARSEHUB_FILES_PORT` | 否 | `21473` | 媒体中转服务端口 |
+| `PARSEHUB_UPLOAD_MODE` | 否 | `http` | 媒体交给协议端的方式：`http` = 发中转地址让协议端自己拉；`base64` = 内容内联进消息段，不启动中转服务 |
+| `PARSEHUB_FILES_HOST` | 否 | 无 | 媒体中转服务对外地址，留空自动探测内网 IP（仅 `http` 模式） |
+| `PARSEHUB_FILES_PORT` | 否 | `21473` | 媒体中转服务端口（仅 `http` 模式） |
 | `PARSEHUB_KEEP_MINUTES` | 否 | `30` | 临时文件保留分钟数 |
 
 > 列表类配置必须是合法 JSON，例如 `PARSEHUB_PROXY_PLATFORMS=["twitter", "youtube"]`。
@@ -209,8 +211,12 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 ### 说明
 
 - 视频走 `video` 消息段，被协议端拒绝时只回应失败表情，**不会**退回群文件
-- 媒体先落到本机临时目录，再通过内置的只读 HTTP 服务给协议端一个 `http://` 地址
-  （协议端常在另一台机器上，读不到本机 `file://` 路径），过期自动清理
+- 媒体先落到本机临时目录，再按 `PARSEHUB_UPLOAD_MODE` 交给协议端：
+  - `http`（默认）：通过内置的只读 HTTP 服务给协议端一个 `http://` 地址
+    （协议端常在另一台机器上，读不到本机 `file://` 路径），过期自动清理
+  - `base64`：把文件内容内联进消息段（`base64://`），不启动中转服务、不占端口，
+    适合协议端连不到本机端口的场景；代价是请求体大约增大 1/3，大视频更容易被协议端拒掉，
+    而且这一模式**不做兜底**——发不出去就是失败，不会偷偷改走 http
 - parsehub 全程是同步阻塞的，插件把所有调用放进 `asyncio.to_thread`，不会阻塞事件循环
 - 解析器首次导入需要几秒（numpy + opencv），插件采用懒加载，不影响机器人启动
 - 信息卡片用 Pillow 画，封面三级兜底：`thumb_url` → 本身就是图片的媒体 → 本地视频抽首帧；
