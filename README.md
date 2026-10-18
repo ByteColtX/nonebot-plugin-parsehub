@@ -31,7 +31,7 @@
 - **体积 / 时长保护 / 去重 / 并发限制 / 临时文件自动清理**（去重只作用于同一会话，跨会话不限制）
 - **时长保护**：视频超过 `PARSEHUB_MAX_SECONDS`（默认 5 分钟）时不下载，只发封面卡片 + 一句「视频太长啦，还是去 xx 看吧」
 - **媒体缓存**：同一作品 24 小时内再出现，直接发本地那份，不再解析下载
-- **上传方式可选**：`PARSEHUB_UPLOAD_MODE=http`（默认，协议端来拉）或 `base64`（内容内联，不占端口）
+- **上传方式可选**：`PARSEHUB_UPLOAD_MODE` 三选一 —— `file`（默认，直接发本机路径）/ `http`（协议端来拉）/ `base64`（内容内联）
 
 ## 🎨 效果图
 
@@ -155,7 +155,7 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 | `PARSEHUB_SEND_TEXT` | 否 | `true` | 是否发送标题 / 正文 |
 | `PARSEHUB_MAX_CHARS` | 否 | `300` | 正文最多发送多少字符 |
 | `PARSEHUB_FAIL_NOTICE` | 否 | `true` | 视频发送失败时是否额外发文字提示 |
-| `PARSEHUB_UPLOAD_MODE` | 否 | `http` | 媒体交给协议端的方式：`http` = 发中转地址让协议端自己拉；`base64` = 内容内联进消息段，不启动中转服务 |
+| `PARSEHUB_UPLOAD_MODE` | 否 | `file` | 媒体交给协议端的方式：`file` = 发本机 `file://` 路径（要求同机）；`http` = 发中转地址让协议端自己拉；`base64` = 内容内联进消息段 |
 | `PARSEHUB_FILES_HOST` | 否 | 无 | 媒体中转服务对外地址，留空自动探测内网 IP（仅 `http` 模式） |
 | `PARSEHUB_FILES_PORT` | 否 | `21473` | 媒体中转服务端口（仅 `http` 模式） |
 | `PARSEHUB_KEEP_MINUTES` | 否 | `30` | 临时文件保留分钟数 |
@@ -211,12 +211,17 @@ nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn
 ### 说明
 
 - 视频走 `video` 消息段，被协议端拒绝时只回应失败表情，**不会**退回群文件
-- 媒体先落到本机临时目录，再按 `PARSEHUB_UPLOAD_MODE` 交给协议端：
-  - `http`（默认）：通过内置的只读 HTTP 服务给协议端一个 `http://` 地址
-    （协议端常在另一台机器上，读不到本机 `file://` 路径），过期自动清理
-  - `base64`：把文件内容内联进消息段（`base64://`），不启动中转服务、不占端口，
-    适合协议端连不到本机端口的场景；代价是请求体大约增大 1/3，大视频更容易被协议端拒掉，
-    而且这一模式**不做兜底**——发不出去就是失败，不会偷偷改走 http
+- 媒体先落到本机临时目录，再按 `PARSEHUB_UPLOAD_MODE` 交给协议端（三选一）：
+  - `file`（默认）：直接发 `file:///...` 本机路径。协议端和机器人跑在同一台机器上时
+    零配置即可用，不开端口、不做额外拷贝；协议端读不到该路径就发不出去
+  - `http`：通过内置的只读 HTTP 服务给协议端一个 `http://` 地址，过期自动清理。
+    协议端在另一台机器上、或跑在容器里读不到宿主机路径时用这个
+  - `base64`：把文件内容内联进消息段（`base64://`），不启动中转服务、不占端口；
+    代价是请求体大约增大 1/3，大视频更容易被协议端拒掉
+  - 三种模式**都不做兜底**：选了哪种就是哪种，发不出去就点失败表情 / 发失败提示，
+    不会偷偷换一种方式重发
+- **从旧版本升级**：默认值从 `http` 改成了 `file`。如果你的协议端不在本机，
+  必须在 `.env` 里显式设 `PARSEHUB_UPLOAD_MODE=http`，否则媒体会发不出去
 - parsehub 全程是同步阻塞的，插件把所有调用放进 `asyncio.to_thread`，不会阻塞事件循环
 - 解析器首次导入需要几秒（numpy + opencv），插件采用懒加载，不影响机器人启动
 - 信息卡片用 Pillow 画，封面三级兜底：`thumb_url` → 本身就是图片的媒体 → 本地视频抽首帧；
