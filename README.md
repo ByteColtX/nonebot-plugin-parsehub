@@ -43,11 +43,11 @@
 
 B 站视频卡片：
 
-![B 站卡片](https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-bilibili.jpg)
+<img src="https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-bilibili.jpg" width="420" alt="B 站卡片">
 
 抖音图集卡片：
 
-![抖音卡片](https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-douyin.jpg)
+<img src="https://raw.githubusercontent.com/ByteColtX/nonebot-plugin-parsehub/main/docs/card-douyin.jpg" width="420" alt="抖音卡片">
 
 ## 💿 安装
 
@@ -59,23 +59,9 @@ B 站视频卡片：
 nb plugin install nonebot-plugin-parsehub --upgrade
 ```
 
-使用 **pypi** 源安装
+使用 uv 安装
 
-```bash
-nb plugin install nonebot-plugin-parsehub --upgrade -i "https://pypi.org/simple"
-```
-
-使用**清华源**安装
-
-```bash
-nb plugin install nonebot-plugin-parsehub --upgrade -i "https://pypi.tuna.tsinghua.edu.cn/simple"
-```
-
-使用包管理器安装
-
-在 nonebot2 项目的插件目录下, 打开命令行, 根据你使用的包管理器, 输入相应的安装命令
-
-uv
+在 nonebot2 项目的插件目录下, 打开命令行, 输入以下指令即可安装
 
 ```bash
 uv add nonebot-plugin-parsehub
@@ -87,54 +73,12 @@ uv add nonebot-plugin-parsehub
 uv add git+https://github.com/ByteColtX/nonebot-plugin-parsehub@main
 ```
 
-pdm
-
-```bash
-pdm add nonebot-plugin-parsehub
-```
-
-安装仓库 main 分支
-
-```bash
-pdm add git+https://github.com/ByteColtX/nonebot-plugin-parsehub@main
-```
-
-poetry
-
-```bash
-poetry add nonebot-plugin-parsehub
-```
-
-安装仓库 main 分支
-
-```bash
-poetry add git+https://github.com/ByteColtX/nonebot-plugin-parsehub@main
-```
-
-打开 nonebot2 项目根目录下的 `pyproject.toml` 文件, 在 `[tool.nonebot]` 部分追加写入
+用 uv 安装后还需要在 nonebot2 项目根目录的 `pyproject.toml` 里注册插件
+（nb-cli 会自动完成这一步）：
 
 ```toml
+[tool.nonebot]
 plugins = ["nonebot_plugin_parsehub"]
-```
-
-使用 nbr 安装(使用 uv 管理依赖可用)
-
-[nbr](https://github.com/fllesser/nbr) 是一个基于 uv 的 nb-cli，可以方便地管理 nonebot2
-
-```bash
-nbr plugin install nonebot-plugin-parsehub
-```
-
-使用 **pypi** 源安装
-
-```bash
-nbr plugin install nonebot-plugin-parsehub -i "https://pypi.org/simple"
-```
-
-使用**清华源**安装
-
-```bash
-nbr plugin install nonebot-plugin-parsehub -i "https://pypi.tuna.tsinghua.edu.cn/simple"
 ```
 
 ## ⚙️ 配置
