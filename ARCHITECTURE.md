@@ -27,7 +27,8 @@ triggers ──► service ──► parsehub_client
 
 - **触发层**（`triggers`）：判断该不该处理、从消息里取链接、调用 `service.handle`。
 - **编排层**（`service`）：固定顺序的流水线，每个结局是 `Outcome` 的一个值。
-- **能力层**：`parsehub_client`（解析 / 下载）、`cache`、`dedupe`、`relay`、`card`。
+- **能力层**：`parsehub_client`（解析 / 下载）、`bilibili`（默认P归一 / 单P时长）、
+  `cache`、`dedupe`、`relay`、`card`。
 - **投递层**（`delivery`）：三种上传模式、合并转发/逐条、失败记账。
 - **反馈层**（`feedback`）：表情与用户提示文案。
 - **装配层**（`app`）：构建、启动、清扫、关闭。

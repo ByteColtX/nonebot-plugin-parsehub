@@ -164,6 +164,16 @@ def matchers(instance, triggers):
 
 
 @pytest.fixture(autouse=True)
+def _offline_bilibili(plugin, monkeypatch):
+    """测试绝不联网查 B 站接口；需要真值的用例自己再 monkeypatch。"""
+
+    def _offline_client(proxy):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(plugin.bilibili, "_client", _offline_client)
+
+
+@pytest.fixture(autouse=True)
 def _offline_card(card, monkeypatch):
     """卡片模块在测试里一律不联网。
 

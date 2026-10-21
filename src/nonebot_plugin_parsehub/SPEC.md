@@ -36,6 +36,7 @@ tags: [nonebot, parsehub, module]
 | `delivery.py` | `Sender` 协议、三种上传模式、合并转发、`MediaReport` |
 | `feedback.py` | `Reaction` 与全部提示文案 |
 | `parsehub_client.py` | 懒加载客户端、cookie 读取 |
+| `bilibili.py` | B 站默认P归一与单P时长查询 |
 | `cache.py` | 作品级媒体缓存（原子写、TTL、容量） |
 | `dedupe.py` | 会话级去重 |
 | `relay.py` | 只读中转服务 |
@@ -75,6 +76,8 @@ tags: [nonebot, parsehub, module]
 - 第三方依赖全是**硬依赖**：parsehub / Pillow / numpy / opencv / localstore 缺了就是
   装错了，代码里不写 `except ImportError` 兜底，也不往别的目录写；降级只发生在产品层
   （卡片→文字、字体→系统字体、体积探测→未知）。
+- B 站分P由 `bilibili` 收口：解析前去掉 `p`（只解析默认P），解析后用
+  `pages[0].duration` 覆盖 ParseHub 给的分P总时长；查不到就保持原值。
 
 ## Known limitations
 
