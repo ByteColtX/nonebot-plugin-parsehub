@@ -320,6 +320,11 @@ def test_content_key_normalises_platform_ids(plugin, keys):
     assert (
         keys.content_key("https://m.bilibili.com/video/BV1yupv6YEuE?p=1") == bv
     )
+    # 不同分P不能撞缓存
+    assert (
+        keys.content_key("https://www.bilibili.com/video/BV1yupv6YEuE?p=2")
+        == "bilibili:bv1yupv6yeue:p2"
+    )
     assert (
         keys.content_key("https://b23.tv/3XdwepO") != bv
     )  # 短链只能等解析展开
@@ -330,6 +335,7 @@ def test_content_key_falls_back_to_host_and_path(plugin, keys):
     key = keys.content_key("https://b23.tv/3XdwepO")
     assert key == "b23.tv/3xdwepo"
     assert keys.content_key("https://b23.tv/3XdwepO?share=1") == key
+    assert keys.content_key("https://b23.tv/3XdwepO?p=2") == "b23.tv/3xdwepo:p2"
 
 
 def test_dedupe_is_per_session(plugin, instance):

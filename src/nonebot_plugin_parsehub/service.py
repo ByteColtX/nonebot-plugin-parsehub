@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, MessageEvent
 
-from . import bilibili, errors, feedback, keys, media, platforms
+from . import errors, feedback, keys, media, platforms
 from .budget import Budget
 from .cache import CacheEntry
 from .delivery import MediaReport, Sender
@@ -253,8 +253,6 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
         本次处理的结局。
     """
     settings = app.settings
-    # B 站分P：带 ?p=N 就解析第 N P，不带就按默认P（P1）。
-    parse_url = bilibili.part_url(url)
 
     # 本地已经有这个作品的媒体就直接发，省掉解析、下载和画卡。
     cached = await asyncio.to_thread(app.cache.get, pre_key)
@@ -262,7 +260,7 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
         return await _deliver_cached(app, sender, event, cached, pre_key)
 
     try:
-        supported = await app.client.is_supported(parse_url)
+        supported = await app.client.is_supported(url)
     except Exception as exc:  # noqa: BLE001 - 判断失败就交给解析去报错
         logger.warning(
             f"[parsehub] 平台支持判断失败 {url}: {type(exc).__name__}: {exc}"
@@ -278,20 +276,10 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
     cookie = await asyncio.to_thread(platform_cookie, platform, settings.cookie)
     logger.debug(f"[parsehub] {platform} 代理={proxy or '直连'}")
 
-    # 短链展开后可能带 p，必须在解析前再归一一次；展开失败就用原链接。
-    try:
-        async with budget.timeout():
-            parse_url = await bilibili.resolve_part_url(url, proxy)
-    except Exception as exc:  # noqa: BLE001 - 展开失败交给 ParseHub 自己处理
-        logger.debug(
-            f"[parsehub] 归一 B 站分P失败: {type(exc).__name__}: {exc}"
-        )
-        parse_url = bilibili.part_url(url)
-
     started = time.monotonic()
     try:
         async with budget.timeout():
-            parsed = await app.client.parse(parse_url, proxy, cookie)
+            parsed = await app.client.parse(url, proxy, cookie)
     except Exception as exc:  # noqa: BLE001 - parsehub 异常类型很多，统一兜底
         failure = errors.translate(exc)
         logger.warning(
@@ -302,7 +290,7 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
             notice = feedback.failure_notice(exc)
         return Result(Outcome.PARSE_FAILED, notice=notice, keys=(pre_key,))
 
-    post_key = keys.content_key(getattr(parsed, "raw_url", "") or parse_url)
+    post_key = keys.content_key(getattr(parsed, "raw_url", "") or url)
     all_keys = tuple(dict.fromkeys([pre_key, post_key]))
     # 平台 id 以解析结果为准（client 可能拿不到），时长单位也跟着它。
     platform_id = str(
@@ -322,14 +310,6 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
     ):
         logger.info(f"[parsehub] {post_key} 在本会话刚发过，跳过发送")
         return Result(Outcome.DUPLICATE, keys=all_keys)
-
-    # ParseHub 的 B 站结果里 duration 是所有分P的总和，这里用目标P的时长覆盖。
-    if platform_id.lower() == "bilibili":
-        lookup_url = getattr(parsed, "raw_url", "") or parse_url
-        page_seconds = await _bilibili_seconds(
-            lookup_url, proxy, cookie, budget
-        )
-        bilibili.apply_duration(parsed, page_seconds)
 
     refs = media.refs_from(parsed)
     seconds = platforms.duration_seconds(
@@ -390,7 +370,7 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
             proxy,
             allow_text=False,
         ),
-        _download(app, parse_url, proxy, cookie, budget, parsed),
+        _download(app, url, proxy, cookie, budget, parsed),
     )
     if files is None:
         return Result(
@@ -426,33 +406,6 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
     )
     outcome = Outcome.DELIVERED if report.ok else Outcome.DELIVERY_FAILED
     return Result(outcome, report=report, keys=all_keys)
-
-
-async def _bilibili_seconds(
-    url: str,
-    proxy: str,
-    cookie: str,
-    budget: Budget,
-) -> int:
-    """查询 B 站目标分P的时长，失败时返回 0。
-
-    Args:
-        url: 已展开的 B 站视频链接。
-        proxy: 解析代理。
-        cookie: 登录态 cookie。
-        budget: 本次工作的超时预算。
-
-    Returns:
-        目标分P的秒数；查询失败或不是视频时返回 0。
-    """
-    try:
-        async with budget.timeout():
-            return await bilibili.part_seconds(url, proxy, cookie)
-    except Exception as exc:  # noqa: BLE001 - 查时长失败不能影响主流程
-        logger.debug(
-            f"[parsehub] 查询 B 站默认P时长失败: {type(exc).__name__}: {exc}"
-        )
-        return 0
 
 
 async def _deliver_cached(
