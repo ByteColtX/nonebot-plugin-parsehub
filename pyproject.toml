@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-plugin-parsehub"
-version = "1.0.2"
+version = "1.0.3"
 description = "基于 ParseHub 的社交媒体链接解析插件：群里出现分享链接时自动解析并发送媒体"
 readme = "README.md"
 requires-python = ">=3.12"

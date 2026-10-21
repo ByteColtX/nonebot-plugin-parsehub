@@ -1081,7 +1081,7 @@ wheels = [
 
 [[package]]
 name = "nonebot-plugin-parsehub"
-version = "1.0.2"
+version = "1.0.3"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
