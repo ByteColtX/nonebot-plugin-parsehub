@@ -143,7 +143,7 @@ async def should_auto(app: App, event: MessageEvent) -> bool:
         return False
     if not switches.is_on(session_key(event)):
         return False  # 这个会话被关掉了
-    return bool(keys.extract_urls(link_sources(event)))
+    return bool(keys.extract_targets(link_sources(event)))
 
 
 def auto_rule(app: App) -> Rule:
@@ -197,7 +197,7 @@ def create_matchers(app: App) -> Matchers:
     @auto.handle()
     async def _handle_auto(bot: Bot, event: MessageEvent) -> None:
         """自动解析消息里的链接。"""
-        urls = keys.extract_urls(link_sources(event))
+        urls = keys.extract_targets(link_sources(event))
         session = session_key(event)
         for url in urls[:MAX_LINKS_PER_MESSAGE]:
             # 只看不记：记录由 service 负责；这里先静默跳过，免得白发「收到」
@@ -220,9 +220,9 @@ def create_matchers(app: App) -> Matchers:
                 "只有超管或群管理员能手动解析。"
             )
         text = args.extract_plain_text().strip() or link_sources(event)
-        urls = keys.extract_urls(text)
+        urls = keys.extract_targets(text)
         if not urls:
-            await parse.finish("用法：解析 <链接或分享文案>")
+            await parse.finish("用法：解析 <链接、BV 号或分享文案>")
         for url in urls[:MAX_LINKS_PER_MESSAGE]:
             await handle(app, bot, event, url, manual=True)
 

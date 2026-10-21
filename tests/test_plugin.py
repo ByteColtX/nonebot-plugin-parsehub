@@ -211,11 +211,58 @@ def test_extract_urls_empty(plugin, keys):
 
 
 # --------------------------------------------------------------------------- #
+# 1b. 裸 BV 号
+# --------------------------------------------------------------------------- #
+BV = "BV1xx411c7mD"
+BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
+
+
+def test_extract_targets_bare_bv(plugin, keys):
+    """只发作品号也能触发，拼成标准链接再交给 parsehub。"""
+    assert keys.extract_targets(BV) == [BV_URL]
+    assert keys.extract_targets(f"看这个 {BV} 好笑") == [BV_URL]
+
+
+def test_extract_targets_skips_bv_inside_url(plugin, keys):
+    """完整链接里的 BV 号不重复取，只留用户发的那条链接。"""
+    link = f"https://www.bilibili.com/video/{BV}?p=2"
+    assert keys.extract_targets(link) == [link]
+    # 不在白名单域名里的链接也不从中抠 BV 号
+    assert keys.extract_targets(f"https://example.com/{BV}") == []
+
+
+def test_extract_targets_bv_boundaries(plugin, keys):
+    """前后紧贴字母数字的不是 BV 号，别误触发。"""
+    assert keys.extract_targets(f"x{BV}") == []
+    assert keys.extract_targets(f"{BV}2") == []
+
+
+def test_extract_targets_keeps_message_order(plugin, keys):
+    """链接和 BV 号混发时按出现顺序处理。"""
+    text = f"{BV} 和 https://b23.tv/abcd"
+    assert keys.extract_targets(text) == [BV_URL, "https://b23.tv/abcd"]
+
+
+def test_bare_bv_shares_key_with_link(plugin, keys):
+    """裸 BV 号与完整链接是同一个作品：去重和缓存都对齐。"""
+    link = f"https://www.bilibili.com/video/{BV}?spm_id_from=333"
+    assert keys.content_key(BV_URL) == keys.content_key(link)
+    assert keys.content_key(BV_URL) == f"bilibili:{BV.lower()}"
+
+
+# --------------------------------------------------------------------------- #
 # 2. 自动触发规则
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_auto_rule_matches_group_link(plugin, instance, triggers):
     event = make_group_event("https://b23.tv/abcd")
+    assert await triggers.should_auto(instance, event) is True
+
+
+@pytest.mark.asyncio
+async def test_auto_rule_matches_bare_bv(plugin, instance, triggers):
+    """消息里只有 BV 号也自动解析。"""
+    event = make_group_event(BV)
     assert await triggers.should_auto(instance, event) is True
 
 

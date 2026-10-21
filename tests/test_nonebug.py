@@ -169,3 +169,54 @@ async def test_unsupported_link_gives_feedback(
             result=None,
         )
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_auto_matcher_parses_bare_bv(
+    app: App, plugin, monkeypatch, instance, matchers
+):
+    """纯 BV 号消息：拼成标准链接再解析，不把作品号原样丢给 parsehub。"""
+    parsed_urls: list[str] = []
+
+    async def fake_parse(url, proxy="", cookie=""):
+        parsed_urls.append(url)
+        return FakeParseResult()
+
+    monkeypatch.setattr(
+        instance.client,
+        "is_supported",
+        lambda url: asyncio.sleep(0, result=True),
+    )
+    monkeypatch.setattr(instance.client, "parse", fake_parse)
+    event = make_group_event("BV1xx411c7mD", message_id=5)
+
+    async with app.test_matcher(matchers.auto) as ctx:
+        bot = ctx.create_bot(
+            base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+        )
+        ctx.receive_event(bot, event)
+        ctx.should_pass_rule()
+        ctx.should_call_api(
+            "set_msg_emoji_like",
+            {
+                "message_id": 5,
+                "emoji_id": plugin.feedback.Reaction.START,
+                "set": True,
+            },
+            result=None,
+        )
+        ctx.should_call_send(
+            event, Message("📦 哔哩哔哩\n标题\n正文"), result=None, bot=bot
+        )
+        ctx.should_call_api(
+            "set_msg_emoji_like",
+            {
+                "message_id": 5,
+                "emoji_id": plugin.feedback.Reaction.OK,
+                "set": True,
+            },
+            result=None,
+        )
+        ctx.should_finished()
+
+    assert parsed_urls == ["https://www.bilibili.com/video/BV1xx411c7mD"]

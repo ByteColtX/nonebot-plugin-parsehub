@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from urllib.parse import parse_qsl, urlsplit
 
 # 预筛白名单：只认这些域名后缀（含子域名）。
@@ -85,6 +86,13 @@ _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("instagram", re.compile(r"/(?:p|reel|tv)/([0-9A-Za-z_-]+)")),
 )
 
+# 裸 BV 号：消息里只有作品号、没有链接时也当成 B 站视频。前后不能紧贴字母数字，
+# 免得把 ``xBV...`` 或更长的串切一段出来。
+_BV_PATTERN = re.compile(r"(?<![0-9A-Za-z])(BV[0-9A-Za-z]{10})(?![0-9A-Za-z])")
+
+# 裸 BV 号拼成的标准链接，和用户直接发完整链接走同一套 key / 缓存。
+_BILIBILI_VIDEO_URL = "https://www.bilibili.com/video/{}"
+
 # 归一化时要去掉的主机名前缀（m.bilibili.com 与 www.bilibili.com 是同一个站）。
 _HOST_PREFIXES = ("www.", "m.", "mobile.")
 
@@ -127,6 +135,24 @@ def _is_bilibili_short_host(host: str) -> bool:
     )
 
 
+def _iter_urls(text: str) -> Iterator[tuple[int, str]]:
+    """扫出文本里落在白名单域名上的链接。
+
+    Args:
+        text: 消息纯文本，可以是分享文案。
+
+    Yields:
+        ``(在原文里的起始下标, 链接)``，保持出现顺序，不去重。
+    """
+    for match in _URL_PATTERN.finditer(text or ""):
+        url = match.group().rstrip(_TRAILING_CHARS)
+        host = (urlsplit(url).hostname or "").lower()
+        if host.startswith("www."):
+            host = host[len("www.") :]
+        if host_allowed(host):
+            yield match.start(), url
+
+
 def extract_urls(text: str) -> list[str]:
     """从消息文本里挑出可能受支持的链接。
 
@@ -139,16 +165,47 @@ def extract_urls(text: str) -> list[str]:
         去重且保持原顺序的链接列表；没有命中时返回空列表。
     """
     found: list[str] = []
-    for raw_url in _URL_PATTERN.findall(text or ""):
-        url = raw_url.rstrip(_TRAILING_CHARS)
-        host = (urlsplit(url).hostname or "").lower()
-        if host.startswith("www."):
-            host = host[len("www.") :]
-        if not host_allowed(host):
-            continue
+    for _, url in _iter_urls(text):
         if url not in found:
             found.append(url)
     return found
+
+
+def extract_targets(text: str) -> list[str]:
+    """从消息文本里挑出所有要解析的目标：链接和裸 BV 号。
+
+    裸 BV 号（``BV1xx411c7mD``）拼成 ``https://www.bilibili.com/video/...`` 再
+    往下走，这样它和完整链接归一成同一个作品 key，缓存也共用。已经写在链接里的
+    BV 号不重复取，两个都发时只留链接本身。
+
+    Args:
+        text: 消息纯文本，可以是分享文案。
+
+    Returns:
+        去重且保持出现顺序的链接列表；没有命中时返回空列表。
+    """
+    text = text or ""
+    # 链接的原始范围（含不在白名单里的）：里面的 BV 号归 extract_urls 管，
+    # 别从 example.com/BV... 这种链接里再抠一个 B 站视频出来。
+    spans = [match.span() for match in _URL_PATTERN.finditer(text)]
+    found: list[tuple[int, str]] = list(_iter_urls(text))
+    seen = {url for _, url in found}
+
+    for match in _BV_PATTERN.finditer(text):
+        start, end = match.span()
+        if any(
+            start < span_end and span_start < end
+            for span_start, span_end in spans
+        ):
+            continue
+        url = _BILIBILI_VIDEO_URL.format(match.group(1))
+        if url in seen:
+            continue
+        seen.add(url)
+        found.append((start, url))
+
+    found.sort(key=lambda item: item[0])
+    return [url for _, url in found]
 
 
 def host_allowed(host: str) -> bool:
