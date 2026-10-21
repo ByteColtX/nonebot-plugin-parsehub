@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 # 预筛白名单：只认这些域名后缀（含子域名）。
 ALLOWED_HOSTS: tuple[str, ...] = (
@@ -88,6 +88,44 @@ _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 # 归一化时要去掉的主机名前缀（m.bilibili.com 与 www.bilibili.com 是同一个站）。
 _HOST_PREFIXES = ("www.", "m.", "mobile.")
 
+# B 站短链没有作品 ID，但分P要进 key，否则同一个短链的不同 P 会撞缓存。
+_BILIBILI_SHORT_HOSTS = ("b23.tv", "bili2233.cn")
+
+
+def _bilibili_part(url: str) -> int:
+    """取 B 站链接里的分P序号。
+
+    Args:
+        url: 链接。
+
+    Returns:
+        大于 0 的分P序号；没写或非法时为默认P（1）。
+    """
+    for key, value in parse_qsl(urlsplit(url).query, keep_blank_values=True):
+        if key.lower() != "p":
+            continue
+        try:
+            part = int(value)
+        except (TypeError, ValueError):
+            return 1
+        return part if part > 0 else 1
+    return 1
+
+
+def _is_bilibili_short_host(host: str) -> bool:
+    """判断主机是不是 B 站短链站。
+
+    Args:
+        host: 已小写的主机名。
+
+    Returns:
+        命中返回 True。
+    """
+    return any(
+        host == item or host.endswith("." + item)
+        for item in _BILIBILI_SHORT_HOSTS
+    )
+
 
 def extract_urls(text: str) -> list[str]:
     """从消息文本里挑出可能受支持的链接。
@@ -134,8 +172,8 @@ def content_key(url: str) -> str:
     认得出作品 ID 的平台直接用 ``平台:id``，这样同一个作品的两种写法能对上——比如
     抖音的 ``v.douyin.com/xxx`` 和 ``iesdouyin.com/share/video/<id>``、B 站的
     ``b23.tv/xxx`` 和 ``bilibili.com/video/BVxxxx``（解析结果里的 ``raw_url``
-    已经是短链展开后的地址）。认不出来的退化成「主机 + 路径」，丢掉查询串和末尾
-    斜杠。
+    已经是短链展开后的地址）。B 站带 ``p`` 时把分P也写进 key，避免不同 P
+    撞缓存。认不出来的退化成「主机 + 路径」，丢掉查询串和末尾斜杠。
 
     Args:
         url: 链接，可以是用户发的原始链接，也可以是 ParseHub 给的 ``raw_url``。
@@ -146,7 +184,12 @@ def content_key(url: str) -> str:
     for name, pattern in _ID_PATTERNS:
         match = pattern.search(url)
         if match:
-            return f"{name}:{match.group(1).lower()}"
+            key = f"{name}:{match.group(1).lower()}"
+            if name == "bilibili":
+                part = _bilibili_part(url)
+                if part > 1:
+                    key += f":p{part}"
+            return key
 
     parsed = urlsplit(url)
     host = parsed.netloc.lower()
@@ -154,4 +197,9 @@ def content_key(url: str) -> str:
         if host.startswith(prefix):
             host = host[len(prefix) :]
             break
-    return f"{host}{parsed.path.rstrip('/')}".lower()
+    key = f"{host}{parsed.path.rstrip('/')}".lower()
+    if _is_bilibili_short_host(host):
+        part = _bilibili_part(url)
+        if part > 1:
+            key += f":p{part}"
+    return key

@@ -253,8 +253,8 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
         本次处理的结局。
     """
     settings = app.settings
-    # B 站只解析默认P：去掉 p 参数，避免用户发的 ?p=2 被当成这次要发的分P。
-    parse_url = bilibili.default_part_url(url)
+    # B 站分P：带 ?p=N 就解析第 N P，不带就按默认P（P1）。
+    parse_url = bilibili.part_url(url)
 
     # 本地已经有这个作品的媒体就直接发，省掉解析、下载和画卡。
     cached = await asyncio.to_thread(app.cache.get, pre_key)
@@ -281,12 +281,12 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
     # 短链展开后可能带 p，必须在解析前再归一一次；展开失败就用原链接。
     try:
         async with budget.timeout():
-            parse_url = await bilibili.resolve_default_part_url(url, proxy)
+            parse_url = await bilibili.resolve_part_url(url, proxy)
     except Exception as exc:  # noqa: BLE001 - 展开失败交给 ParseHub 自己处理
         logger.debug(
-            f"[parsehub] 归一 B 站默认P失败: {type(exc).__name__}: {exc}"
+            f"[parsehub] 归一 B 站分P失败: {type(exc).__name__}: {exc}"
         )
-        parse_url = bilibili.default_part_url(url)
+        parse_url = bilibili.part_url(url)
 
     started = time.monotonic()
     try:
@@ -323,7 +323,7 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
         logger.info(f"[parsehub] {post_key} 在本会话刚发过，跳过发送")
         return Result(Outcome.DUPLICATE, keys=all_keys)
 
-    # ParseHub 的 B 站结果里 duration 是所有分P的总和，这里用默认P的时长覆盖。
+    # ParseHub 的 B 站结果里 duration 是所有分P的总和，这里用目标P的时长覆盖。
     if platform_id.lower() == "bilibili":
         lookup_url = getattr(parsed, "raw_url", "") or parse_url
         page_seconds = await _bilibili_seconds(
@@ -434,7 +434,7 @@ async def _bilibili_seconds(
     cookie: str,
     budget: Budget,
 ) -> int:
-    """查询 B 站默认P的时长，失败时返回 0。
+    """查询 B 站目标分P的时长，失败时返回 0。
 
     Args:
         url: 已展开的 B 站视频链接。
@@ -443,11 +443,11 @@ async def _bilibili_seconds(
         budget: 本次工作的超时预算。
 
     Returns:
-        默认P的秒数；查询失败或不是视频时返回 0。
+        目标分P的秒数；查询失败或不是视频时返回 0。
     """
     try:
         async with budget.timeout():
-            return await bilibili.default_part_seconds(url, proxy, cookie)
+            return await bilibili.part_seconds(url, proxy, cookie)
     except Exception as exc:  # noqa: BLE001 - 查时长失败不能影响主流程
         logger.debug(
             f"[parsehub] 查询 B 站默认P时长失败: {type(exc).__name__}: {exc}"
