@@ -3,7 +3,6 @@ id: parsehub-architecture
 type: architecture-design
 status: draft
 title: ParseHub 插件：架构与不变量
-parent: parsehub-goal
 tags: [nonebot, parsehub, architecture]
 ---
 
@@ -67,3 +66,5 @@ triggers ──► service ──► parsehub_client
 
 - parsehub 是同步库，线程无法取消：下载超时后那次下载仍会跑完，只是不再重试。
 - 中转服务无鉴权；任务目录名随机不可猜，默认绑 `0.0.0.0` 是跨机投递的前提。
+- `sessions.json` 带 schema 版本（当前 2）；版本不符时按默认值处理。
+- 平台白名单只能表达「只解析这些」，无法表达「除某平台外全部」。

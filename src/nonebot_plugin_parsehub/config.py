@@ -7,8 +7,8 @@
 
 - :class:`Config` 是 NoneBot 从 ``.env`` / 环境变量读进来的原始配置，字段名即
   配置名（大小写不敏感），例如 ``parsehub_max_file_mb`` 对应
-  ``PARSEHUB_MAX_FILE_MB=100``。所有数值项都带下界校验：写 0 或负数会在启动时
-  直接报错，而不是运行到一半才炸。
+  ``PARSEHUB_MAX_FILE_MB=100``。所有数值项都带下界校验：低于下界会在启动时直接
+  报错，而不是运行到一半才炸（标 ``0`` = 不限的项允许 0）。
 - :class:`Settings` 是把 ``Config`` 归一化之后的只读快照（字节数、秒数、平台
   集合、字体路径）。运行期只读它，测试可以用 ``dataclasses.replace`` 改一项。
 

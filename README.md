@@ -97,7 +97,8 @@ plugins = ["nonebot_plugin_parsehub"]
 | `PARSEHUB_TASK_TTL_MINUTES` | 否 | `30` | 临时文件保留分钟数 |
 
 > 列表类配置必须是合法 JSON（如 `PARSEHUB_PROXY_PLATFORMS=["twitter", "youtube"]`）；
-> 数值项有下界校验（如 `PARSEHUB_TIMEOUT >= 5`），写 0 或负数会在启动时直接报错。
+> 数值项有下界校验（如 `PARSEHUB_TIMEOUT >= 5`）：低于下界（多数为负数）会在启动时直接报错；
+> 标了 `0` = 不限 / 关闭的项除外。
 > 哪些群 / 私聊解析由命令 `/解析开关` 控制，没有对应的配置项。
 
 需要登录态的平台（X、Instagram、TikTok、豆瓣、微信视频号 等），cookie 优先从 ParseHub 自己的配置读取
@@ -122,7 +123,7 @@ plugins = ["nonebot_plugin_parsehub"]
 - 群里发链接或分享文案即自动解析，一条消息最多处理 **3 个**链接
 - 只有 B 站 BV 号（如 `BV1xx411c7mD`）也会自动解析，和完整链接共用去重与缓存
 - `/解析关` 后该会话不再自动解析；手动 `/解析` 只对超管 / 群管理有效
-- 不带前缀的「解析 <链接>」**不是**命令，会当作普通消息自动解析（带去重、不额外提示）
+- 默认配置下（`COMMAND_START` 只有 `/`），不带前缀的「解析 <链接>」**不是**命令，会当作普通消息自动解析（带去重、不额外提示）
 
 ### 解析开关
 
@@ -145,7 +146,7 @@ plugins = ["nonebot_plugin_parsehub"]
 - 视频被协议端拒绝时只点失败表情，**不会**退回群文件
 - 投递三选一、**互不兜底**：`file` 发本机路径（协议端同机）/ `http` 发中转地址（跨机）/ `base64` 内容内联（请求体约 +1/3）
 - parsehub 全程同步阻塞，插件把所有调用放进 `asyncio.to_thread`；首次导入懒加载，不影响启动
-- 卡片用 Pillow 画，封面三级兜底（`thumb_url` → 图片媒体 → 视频抽帧），没装 Pillow 或没有中文字体时自动退回文字；
+- 卡片用 Pillow 画，封面三级兜底（`thumb_url` → 图片媒体 → 视频抽帧），渲染异常时自动退回文字（Pillow 是硬依赖，正常安装不会缺）；
   字体优先 `PARSEHUB_CARD_FONT` → 缓存目录 → 系统字体 → 下载（sha256 校验），缺字用回退字体补，emoji 用 Twemoji 位图字体
 
 ## 🛠️ 开发
@@ -156,6 +157,9 @@ uv run poe check                # 代码检查 + 格式检查 + 测试（CI 同�
 uv run pytest -q                # 只跑测试
 uv run poe live                 # 真实链路自检（解析 → 下载 → 中转取回）
 ```
+
+架构与不变量见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；需求 / 模块 spec 已归档在
+`archive/specs` 分支，不再随 main 发布。
 
 ### 代码结构
 
@@ -169,6 +173,14 @@ src/nonebot_plugin_parsehub/
 ├── dedupe.py           # 会话级去重（claim / commit / release）
 ├── relay.py            # 只读中转服务（只服务 relay/）
 ├── parsehub_client.py  # ParseHub 懒加载 + 线程池封装
+├── platforms.py        # 平台元数据（展示名 / 颜色 / logo / 时长单位）
+├── keys.py             # 链接识别与作品 key 归一
+├── switches.py         # 按会话的解析开关
+├── media.py            # parsehub 结果 → MediaRef / MediaFile
+├── errors.py           # 异常分类与用户文案
+├── paths.py            # localstore 目录约定
+├── budget.py           # 解析 / 下载共享的超时预算
+├── config.py           # 配置读取与归一化
 ├── card/               # fonts / cover / layout + CardRenderer
 └── app.py              # 装配与生命周期
 ```
