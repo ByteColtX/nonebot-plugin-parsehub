@@ -171,7 +171,7 @@ async def handle(
     session = session_key(event)
     try:
         platform = await app.client.platform_id(url) or ""
-    except Exception as exc:  # noqa: BLE001 - 平台识别失败按未知平台继续
+    except Exception as exc:  # 平台识别失败按未知平台继续
         logger.warning(
             f"[parsehub] 平台识别失败 {url}: {type(exc).__name__}: {exc}"
         )
@@ -199,7 +199,7 @@ async def handle(
             result = await _deliver(
                 app, sender, event, url, platform, session, pre_key, manual
             )
-    except Exception as exc:  # noqa: BLE001 - 兜底：任何路径都要有终点
+    except Exception as exc:  # 兜底：任何路径都要有终点
         logger.exception(f"[parsehub] 处理 {url} 时出现未预期异常: {exc}")
         result = Result(
             Outcome.INTERNAL_ERROR,
@@ -227,7 +227,7 @@ async def handle(
     return result
 
 
-async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
+async def _deliver(  # 顺序编排本身就是一条长流水线
     app: App,
     sender: Sender,
     event: MessageEvent,
@@ -261,7 +261,7 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
 
     try:
         supported = await app.client.is_supported(url)
-    except Exception as exc:  # noqa: BLE001 - 判断失败就交给解析去报错
+    except Exception as exc:  # 判断失败就交给解析去报错
         logger.warning(
             f"[parsehub] 平台支持判断失败 {url}: {type(exc).__name__}: {exc}"
         )
@@ -280,7 +280,7 @@ async def _deliver(  # noqa: C901 - 顺序编排本身就是一条长流水线
     try:
         async with budget.timeout():
             parsed = await app.client.parse(url, proxy, cookie)
-    except Exception as exc:  # noqa: BLE001 - parsehub 异常类型很多，统一兜底
+    except Exception as exc:  # parsehub 异常类型很多，统一兜底
         failure = errors.translate(exc)
         logger.warning(
             f"[parsehub] 解析失败 {url}: {type(exc).__name__}: {exc}"
@@ -496,7 +496,7 @@ async def _download(
     proxy: str,
     cookie: str,
     budget: Budget,
-    parsed: Any,  # noqa: ANN401 - ParseHub 解析结果
+    parsed: Any,  # ParseHub 解析结果
 ) -> tuple[list[MediaFile] | None, BaseException | None]:
     """下载媒体到新的任务目录。
 
@@ -528,7 +528,7 @@ async def _download(
                     downloaded = await app.client.download(
                         url, str(task_dir), proxy, cookie
                     )
-        except Exception as exc:  # noqa: BLE001 - 下载失败原因很多，统一兜底
+        except Exception as exc:  # 下载失败原因很多，统一兜底
             last_error = exc
             failure = errors.translate(exc)
             logger.warning(
@@ -555,7 +555,7 @@ async def _send_card_or_text(
     app: App,
     sender: Sender,
     event: MessageEvent,
-    parsed: Any,  # noqa: ANN401 - ParseHub 解析结果
+    parsed: Any,  # ParseHub 解析结果
     files: list[MediaFile],
     task_dir: Path | None,
     proxy: str = "",
@@ -594,7 +594,7 @@ async def _send_card_or_text(
     return _SentInfo()
 
 
-def _build_caption(parsed: Any, max_chars: int) -> str:  # noqa: ANN401
+def _build_caption(parsed: Any, max_chars: int) -> str:
     """拼装解析结果的文字消息（不含原始链接）。
 
     Args:

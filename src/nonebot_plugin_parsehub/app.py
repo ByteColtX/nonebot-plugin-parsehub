@@ -158,7 +158,7 @@ class App:
         """后台预热 parsehub（首次 import numpy + opencv 要几秒）。"""
         try:
             await self.client.hub()
-        except Exception as exc:  # noqa: BLE001 - 预热失败不影响按需加载
+        except Exception as exc:  # 预热失败不影响按需加载
             logger.warning(f"[parsehub] 预热失败: {type(exc).__name__}: {exc}")
         else:
             logger.info("[parsehub] parsehub 已预热")
@@ -172,7 +172,7 @@ class App:
                     self.relay.cleanup, self.settings.task_ttl_seconds
                 )
                 expired = await asyncio.to_thread(self.cache.sweep)
-            except Exception as exc:  # noqa: BLE001 - 清扫失败不能停掉循环
+            except Exception as exc:  # 清扫失败不能停掉循环
                 logger.warning(f"[parsehub] 清理失败: {exc}")
                 continue
             if removed:

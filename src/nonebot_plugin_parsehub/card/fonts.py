@@ -155,7 +155,7 @@ def _fetch_font(
             return False
         tmp.replace(target)
         landed = True
-    except Exception as exc:  # noqa: BLE001 - 网络问题都算下载失败
+    except Exception as exc:  # 网络问题都算下载失败
         logger.warning(f"[parsehub] 字体下载失败 {source.url}: {exc}")
         return False
     finally:
@@ -166,7 +166,7 @@ def _fetch_font(
 
 
 # 结果类型 → 中文标签
-def _pil() -> Any:  # noqa: ANN401 - 返回 PIL.Image 模块，避免顶层 import 失败
+def _pil() -> Any:  # 返回 PIL.Image 模块，避免顶层 import 失败
     """延迟导入 Pillow，缺失时由调用方处理。
 
     Returns:
@@ -201,7 +201,7 @@ def _font_file() -> Path | None:
 
 
 @lru_cache(maxsize=32)
-def _font(size: int, weight: int = 400) -> Any:  # noqa: ANN401 - PIL FreeTypeFont
+def _font(size: int, weight: int = 400) -> Any:  # PIL FreeTypeFont
     """按字号和字重取字体对象（带缓存）。
 
     Args:
@@ -222,7 +222,7 @@ def _font(size: int, weight: int = 400) -> Any:  # noqa: ANN401 - PIL FreeTypeFo
     font = ImageFont.truetype(str(path), size)
     try:
         font.set_variation_by_axes([weight])
-    except Exception:  # noqa: BLE001 - 非可变字体不支持设置字重
+    except Exception:  # 非可变字体不支持设置字重
         pass
     return font
 
@@ -264,7 +264,7 @@ def _emoji_font_file() -> Path | None:
 
 
 @lru_cache(maxsize=1)
-def _emoji_strike_font() -> Any:  # noqa: ANN401 - PIL FreeTypeFont
+def _emoji_strike_font() -> Any:  # PIL FreeTypeFont
     """取 emoji 字体对象（位图字体只有固定档位）。
 
     CBDT 位图字体按档位给字号，随便传一个数字会报 ``invalid pixel size``，所以从
@@ -282,7 +282,7 @@ def _emoji_strike_font() -> Any:  # noqa: ANN401 - PIL FreeTypeFont
     for size in range(8, 300):
         try:
             return ImageFont.truetype(str(path), size)
-        except Exception:  # noqa: BLE001 - 这个档位没有就试下一个
+        except Exception:  # 这个档位没有就试下一个
             continue
     return None
 
@@ -299,7 +299,7 @@ def ensure_emoji_font(cache_dir: Path, url: str = "") -> Path | None:
     Returns:
         字体文件路径；不可用时为 ``None``。
     """
-    global _EMOJI_FONT  # noqa: PLW0603 - 单例式配置
+    global _EMOJI_FONT  # 单例式配置
 
     if _EMOJI_FONT is not None and _EMOJI_FONT.exists():
         return _EMOJI_FONT
@@ -407,7 +407,7 @@ def _fallback_fonts(size: int) -> tuple[Any, ...]:
     for path in _FALLBACK_FILES:
         try:
             fonts.append(ImageFont.truetype(str(path), size))
-        except Exception:  # noqa: BLE001 - 字体坏掉就跳过，不影响出卡
+        except Exception:  # 字体坏掉就跳过，不影响出卡
             continue
     return tuple(fonts)
 
@@ -421,7 +421,7 @@ def ensure_fallback_fonts(cache_dir: Path) -> list[Path]:
     Returns:
         可用的字体文件列表；某个下不到就当它不存在（缺字退回方块），不影响出卡。
     """
-    global _FALLBACK_FILES  # noqa: PLW0603 - 单例式配置
+    global _FALLBACK_FILES  # 单例式配置
 
     # 已经装好了就直接返回，别每出一张卡就把两个字体重新哈希一遍
     if _FALLBACK_FILES and all(path.exists() for path in _FALLBACK_FILES):
@@ -446,7 +446,7 @@ def ensure_fallback_fonts(cache_dir: Path) -> list[Path]:
     return files
 
 
-def _has_glyph(font: Any, text: str) -> bool:  # noqa: ANN401 - PIL FreeTypeFont
+def _has_glyph(font: Any, text: str) -> bool:  # PIL FreeTypeFont
     """查字体里有没有这段文字的字形。
 
     用私用区字符当"必然缺字"的参照，跟 ``.notdef`` 的 mask 比"不相等"——不能比
@@ -465,7 +465,7 @@ def _has_glyph(font: Any, text: str) -> bool:  # noqa: ANN401 - PIL FreeTypeFont
         try:
             missing = bytes(font.getmask("\ue123", mode="L"))
             _GLYPH_CACHE[key] = bytes(font.getmask(text, mode="L")) != missing
-        except Exception:  # noqa: BLE001 - 取不到字形就当画不了
+        except Exception:  # 取不到字形就当画不了
             _GLYPH_CACHE[key] = False
     return _GLYPH_CACHE[key]
 
@@ -476,7 +476,7 @@ def set_font(path: Path) -> None:
     Args:
         path: 字体文件路径。
     """
-    global _CUSTOM_FONT  # noqa: PLW0603 - 单例式配置
+    global _CUSTOM_FONT  # 单例式配置
     _CUSTOM_FONT = path
     _font_file.cache_clear()
     _font.cache_clear()
@@ -492,7 +492,7 @@ def ensure_font(cache_dir: Path, url: str = "") -> Path | None:
     Returns:
         字体文件路径；不可用时为 ``None``。
     """
-    global _CUSTOM_FONT  # noqa: PLW0603 - 单例式配置
+    global _CUSTOM_FONT  # 单例式配置
 
     if _CUSTOM_FONT is not None and _CUSTOM_FONT.exists():
         return _CUSTOM_FONT

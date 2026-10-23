@@ -115,7 +115,7 @@ def kind_of(path: Path) -> MediaKind:
     return MediaKind.FILE
 
 
-def _items(value: Any) -> list[Any]:  # noqa: ANN401 - parsehub 的结果对象
+def _items(value: Any) -> list[Any]:  # parsehub 的结果对象
     """把可能为单个值的 ``media`` 统一成列表。
 
     Args:
@@ -129,7 +129,7 @@ def _items(value: Any) -> list[Any]:  # noqa: ANN401 - parsehub 的结果对象
     return [value] if value else []
 
 
-def refs_from(result: Any) -> list[MediaRef]:  # noqa: ANN401 - parsehub 结果
+def refs_from(result: Any) -> list[MediaRef]:  # parsehub 结果
     """把解析结果里的媒体转成 :class:`MediaRef`。
 
     Args:
@@ -155,7 +155,7 @@ def refs_from(result: Any) -> list[MediaRef]:  # noqa: ANN401 - parsehub 结果
     return refs
 
 
-def files_from(downloaded: Any) -> list[MediaFile]:  # noqa: ANN401 - 下载结果
+def files_from(downloaded: Any) -> list[MediaFile]:  # 下载结果
     """把下载结果里的本地媒体收集成列表。
 
     实况照片会同时产出图片和一段短视频，两个都要发，否则实况照片会退化成静态图。

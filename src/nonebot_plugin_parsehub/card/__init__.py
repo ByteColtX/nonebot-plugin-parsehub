@@ -138,7 +138,7 @@ class CardRenderer:
 
     async def render(
         self,
-        result: Any,  # noqa: ANN401 - ParseHub 解析结果
+        result: Any,  # ParseHub 解析结果
         files: list[Path],
         task_dir: Path | None,
         proxy: str = "",
@@ -171,7 +171,7 @@ class CardRenderer:
             target_dir = task_dir or self._new_task_dir()
             out_path = target_dir / "card.jpg"
             await asyncio.to_thread(layout.render, result, picture, out_path)
-        except Exception as exc:  # noqa: BLE001 - 渲染失败不能让解析白做
+        except Exception as exc:  # 渲染失败不能让解析白做
             logger.warning(
                 f"[parsehub] 卡片渲染失败: {type(exc).__name__}: {exc}"
             )

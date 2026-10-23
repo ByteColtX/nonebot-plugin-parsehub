@@ -18,7 +18,7 @@ from nonebot import logger
 from .fonts import _pil
 
 
-def _is_placeholder(data: bytes, image: Any) -> bool:  # noqa: ANN401 - PIL Image
+def _is_placeholder(data: bytes, image: Any) -> bool:  # PIL Image
     """判断封面是不是纯色占位图。
 
     Args:
@@ -61,7 +61,7 @@ def _frame_from_video(path: Path) -> bytes | None:
     return buffer.getvalue()
 
 
-def fetch_cover(  # noqa: ANN401
+def fetch_cover(
     result: Any,
     local_files: list[Path],
     proxy: str = "",
@@ -104,7 +104,7 @@ def fetch_cover(  # noqa: ANN401
                     continue
                 try:
                     image = Image.open(io.BytesIO(resp.content)).convert("RGB")
-                except Exception:  # noqa: BLE001 - 不是图片就换下一个来源
+                except Exception:  # 不是图片就换下一个来源
                     continue
                 if not _is_placeholder(resp.content, image):
                     return resp.content
@@ -119,7 +119,7 @@ def fetch_cover(  # noqa: ANN401
                 resp = client.get(getattr(item, "url", ""))
                 if resp.status_code == 200 and len(resp.content) > 24_000:
                     return resp.content
-    except Exception as exc:  # noqa: BLE001 - 网络问题都算取封面失败
+    except Exception as exc:  # 网络问题都算取封面失败
         logger.warning(f"[parsehub] 取封面失败: {type(exc).__name__}: {exc}")
 
     for path in local_files:

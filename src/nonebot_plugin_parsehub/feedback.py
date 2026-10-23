@@ -50,7 +50,7 @@ async def react(
             emoji_id=str(reaction),
             set=True,
         )
-    except Exception as exc:  # noqa: BLE001 - 回应只是锦上添花
+    except Exception as exc:  # 回应只是锦上添花
         logger.debug(f"[parsehub] 表情回应 {reaction} 失败（忽略）: {exc}")
 
 

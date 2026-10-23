@@ -123,7 +123,7 @@ def _parsehub_errors() -> dict[str, type[BaseException]]:
     Returns:
         类名到类对象的映射。
     """
-    global _PARSEHUB_ERRORS  # noqa: PLW0603 - 单例式缓存
+    global _PARSEHUB_ERRORS  # 单例式缓存
     if _PARSEHUB_ERRORS is None:
         from parsehub import errors as module
 

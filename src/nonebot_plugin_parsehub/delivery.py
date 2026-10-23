@@ -281,7 +281,7 @@ class Delivery:
         """
         try:
             await sender.send(event, Message(text))
-        except Exception as exc:  # noqa: BLE001 - 协议端原因很多，统一兜底
+        except Exception as exc:  # 协议端原因很多，统一兜底
             logger.warning(
                 f"[parsehub] 消息发送失败: {type(exc).__name__}: {exc}"
             )
@@ -307,7 +307,7 @@ class Delivery:
         try:
             ref = await self.ref(path)
             await sender.send(event, MessageSegment.image(file=ref))
-        except Exception as exc:  # noqa: BLE001 - 发图失败就退回文字
+        except Exception as exc:  # 发图失败就退回文字
             logger.warning(
                 f"[parsehub] 卡片发送失败: {type(exc).__name__}: {exc}"
             )
@@ -419,7 +419,7 @@ class Delivery:
         except ActionFailed as exc:
             logger.warning(f"[parsehub] 媒体被协议端拒绝: {exc}")
             return False
-        except Exception as exc:  # noqa: BLE001 - 协议端行为不确定，统一兜底
+        except Exception as exc:  # 协议端行为不确定，统一兜底
             logger.warning(
                 f"[parsehub] 媒体发送异常: {type(exc).__name__}: {exc}"
             )
@@ -459,7 +459,7 @@ class Delivery:
                     file=ref,
                     name=name,
                 )
-        except Exception as exc:  # noqa: BLE001 - 协议端可能不支持文件上传
+        except Exception as exc:  # 协议端可能不支持文件上传
             logger.warning(f"[parsehub] 文件上传失败: {exc}")
             return False
         return True
@@ -521,7 +521,7 @@ class Delivery:
                     messages=nodes,
                     _timeout=timeout,
                 )
-        except Exception as exc:  # noqa: BLE001 - 协议端可能不支持合并转发
+        except Exception as exc:  # 协议端可能不支持合并转发
             logger.warning(
                 f"[parsehub] 合并转发失败（等了 "
                 f"{time.monotonic() - started:.1f}s，上限 {timeout}s），"

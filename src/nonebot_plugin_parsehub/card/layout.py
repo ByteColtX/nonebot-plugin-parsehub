@@ -90,7 +90,7 @@ def _is_emoji_char(ch: str) -> bool:
 
 def _font_runs(
     text: str,
-    font: Any,  # noqa: ANN401 - PIL FreeTypeFont
+    font: Any,  # PIL FreeTypeFont
     emoji_size: int = 0,
 ) -> list[tuple[str, Any]]:
     """把文本切成 (片段, 用哪个字体) 的序列。
@@ -133,7 +133,7 @@ def _font_runs(
     return runs
 
 
-def _advance(text: str, font: Any, emoji_size: int = 0) -> float:  # noqa: ANN401
+def _advance(text: str, font: Any, emoji_size: int = 0) -> float:
     """算一段文字实际画出来有多宽（跟 :func:`draw_text` 的推进保持一致）。
 
     Args:
@@ -198,7 +198,7 @@ def _split_emoji(text: str) -> list[tuple[str, bool]]:
 
 
 @lru_cache(maxsize=256)
-def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int, float]:  # noqa: ANN401
+def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int, float]:
     """把一段 emoji 画在透明小图上，缩到目标大小。
 
     位图字体只有一档，所以先按档位画，再按比例缩到目标高度。推进宽度用字体自己的
@@ -263,10 +263,10 @@ def _emoji_tile(chunk: str, size: int) -> tuple[Any, int, int, float]:  # noqa: 
 
 
 def draw_text(
-    draw: Any,  # noqa: ANN401 - PIL ImageDraw
+    draw: Any,  # PIL ImageDraw
     xy: tuple[int, int],
     text: str,
-    font: Any,  # noqa: ANN401 - PIL FreeTypeFont
+    font: Any,  # PIL FreeTypeFont
     fill: tuple[int, int, int],
     emoji_size: int = 0,
 ) -> None:
@@ -319,7 +319,7 @@ def _flat(text: str) -> str:
 
 def wrap(
     text: str,
-    font: Any,  # noqa: ANN401 - PIL FreeTypeFont
+    font: Any,  # PIL FreeTypeFont
     max_w: int,
     max_lines: int,
     emoji_size: int = 0,
@@ -383,7 +383,7 @@ def wrap(
 
 def fit_title(
     title: str,
-    font: Any,  # noqa: ANN401 - PIL FreeTypeFont
+    font: Any,  # PIL FreeTypeFont
     max_w: int,
     max_lines: int,
     emoji_size: int = 0,
@@ -434,7 +434,7 @@ def format_duration(seconds: int, *, is_ms: bool = False) -> str:
     return f"{minutes:02d}:{sec:02d}"
 
 
-def platform_uses_milliseconds(result: Any) -> bool:  # noqa: ANN401
+def platform_uses_milliseconds(result: Any) -> bool:
     """该平台的 ``duration`` 是不是毫秒。
 
     Args:
@@ -447,7 +447,7 @@ def platform_uses_milliseconds(result: Any) -> bool:  # noqa: ANN401
     return uses_milliseconds(platform_id)
 
 
-def video_seconds(result: Any) -> int:  # noqa: ANN401
+def video_seconds(result: Any) -> int:
     """取结果里最长媒体的时长（秒）。
 
     上游单位不统一：毫秒（抖音 / 小红书）要除 1000；另外把明显过大的
@@ -474,7 +474,7 @@ def video_seconds(result: Any) -> int:  # noqa: ANN401
     )
 
 
-def platform_of(result: Any) -> tuple[str, tuple[int, int, int], str]:  # noqa: ANN401
+def platform_of(result: Any) -> tuple[str, tuple[int, int, int], str]:
     """取平台展示名、品牌色和 logo 名。
 
     Args:
@@ -491,7 +491,7 @@ def platform_of(result: Any) -> tuple[str, tuple[int, int, int], str]:  # noqa: 
     return name, (150, 150, 150), "x"
 
 
-def meta_line(result: Any, media_count: int, is_ms: bool) -> str:  # noqa: ANN401
+def meta_line(result: Any, media_count: int, is_ms: bool) -> str:
     """拼装元信息行（类型 · 时长 · 媒体数）。
 
     Args:
@@ -525,7 +525,7 @@ def _vertical_mask(
     peak: int = 255,
     floor: int = 0,
     curve: float = 1.0,
-) -> Any:  # noqa: ANN401 - PIL Image
+) -> Any:  # PIL Image
     """用 numpy 一次算出竖直渐变遮罩。
 
     逐行画线会长时间占着 GIL，放线程里也会把事件循环卡住，所以整张图一次性
@@ -558,7 +558,7 @@ def _vertical_mask(
 
 
 @lru_cache(maxsize=32)
-def _logo(slug: str, height: int) -> Any:  # noqa: ANN401 - PIL Image
+def _logo(slug: str, height: int) -> Any:  # PIL Image
     """读 logo 并缩放（带缓存）。
 
     Args:
@@ -593,7 +593,7 @@ def _logo(slug: str, height: int) -> Any:  # noqa: ANN401 - PIL Image
     return logo.resize((width, height), Image.LANCZOS)
 
 
-def _is_dark(logo: Any) -> bool:  # noqa: ANN401 - PIL Image
+def _is_dark(logo: Any) -> bool:  # PIL Image
     """判断 logo 是否要转成白色剪影。
 
     只有「偏暗且基本没有颜色」的标才转白：X、Threads、Medium 这类纯黑标在深色
@@ -621,7 +621,7 @@ def _is_dark(logo: Any) -> bool:  # noqa: ANN401 - PIL Image
     return total / count < 110 and colorful / count < 0.2
 
 
-def _white(logo: Any) -> Any:  # noqa: ANN401 - PIL Image
+def _white(logo: Any) -> Any:  # PIL Image
     """把 logo 的 alpha 通道填成白色。
 
     Args:
@@ -638,7 +638,7 @@ def _white(logo: Any) -> Any:  # noqa: ANN401 - PIL Image
 
 
 @lru_cache(maxsize=32)
-def _shadowed_logo(slug: str, height: int) -> Any:  # noqa: ANN401 - PIL Image
+def _shadowed_logo(slug: str, height: int) -> Any:  # PIL Image
     """Logo 转白（必要时）并加投影，结果缓存。
 
     PIL 的 Image 不可哈希，所以按 ``slug + 高度`` 缓存。
@@ -669,7 +669,7 @@ def _shadowed_logo(slug: str, height: int) -> Any:  # noqa: ANN401 - PIL Image
 
 
 def render(
-    result: Any,  # noqa: ANN401 - ParseHub 解析结果
+    result: Any,  # ParseHub 解析结果
     cover: bytes,
     out_path: Path,
 ) -> bool:
@@ -804,6 +804,6 @@ def available() -> bool:
     """
     try:
         _font(TITLE_SIZE, 700)
-    except Exception:  # noqa: BLE001 - 缺 Pillow 或缺字体都算不可用
+    except Exception:  # 缺 Pillow 或缺字体都算不可用
         return False
     return True
