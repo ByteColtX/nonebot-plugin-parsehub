@@ -89,13 +89,11 @@ class MediaFile:
         path: 本地路径。
         kind: 投递方式。
         duration: 时长（秒），未知为 0。
-        live_photo: 是否来自实况照片的短视频。
     """
 
     path: Path
     kind: MediaKind
     duration: int = 0
-    live_photo: bool = False
 
 
 def kind_of(path: Path) -> MediaKind:
@@ -175,9 +173,7 @@ def files_from(downloaded: Any) -> list[MediaFile]:  # 下载结果
         video_path = getattr(item, "video_path", None)
         if video_path:
             video = Path(video_path)
-            files.append(
-                MediaFile(path=video, kind=MediaKind.VIDEO, live_photo=True)
-            )
+            files.append(MediaFile(path=video, kind=MediaKind.VIDEO))
     return files
 
 

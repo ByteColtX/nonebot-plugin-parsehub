@@ -63,12 +63,6 @@ class FakeResult:
         self.type = FakeType(post_type)
 
 
-@pytest.fixture(autouse=True)
-def _use_test_font(card) -> None:
-    """所有测试都用子集字体。"""
-    card.fonts.set_font(FONT)
-
-
 def test_format_duration_seconds(card) -> None:
     """秒为单位的平台正常格式化。"""
     assert card.layout.format_duration(33) == "00:33"
