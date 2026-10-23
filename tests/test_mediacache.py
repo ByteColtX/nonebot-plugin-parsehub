@@ -10,6 +10,8 @@ import os
 import time
 from pathlib import Path
 
+import pytest
+
 
 def _files(tmp_path: Path, *names: str, size: int = 1024) -> list[Path]:
     """造几个假媒体文件。"""
@@ -187,6 +189,25 @@ def test_corrupt_meta_is_miss(tmp_path: Path, cache) -> None:
     assert entry is not None
     (entry / "meta.json").write_text("{not json", "utf-8")
     assert store.get("k") is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("updated_at", "not-a-number"), ("seconds", "oops")],
+)
+def test_bad_meta_field_is_miss(
+    tmp_path: Path, cache, field: str, value: str
+) -> None:
+    """meta 字段类型不对也算坏缓存，不能把 get / sweep 打崩。"""
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
+    entry = store.store(["k"], _files(tmp_path, "a.jpg"))
+    assert entry is not None
+    meta = _meta(entry)
+    meta[field] = value
+    (entry / "meta.json").write_text(json.dumps(meta), "utf-8")
+
+    assert store.get("k") is None
+    assert store.sweep() == 0
 
 
 def test_broken_alias_is_cleaned(tmp_path: Path, cache) -> None:

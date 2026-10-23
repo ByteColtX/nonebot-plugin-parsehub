@@ -116,7 +116,10 @@ def fetch_cover(
                     "webp",
                 ):
                     continue
-                resp = client.get(getattr(item, "url", ""))
+                url = getattr(item, "url", "")
+                if not url:
+                    continue
+                resp = client.get(url)
                 if resp.status_code == 200 and len(resp.content) > 24_000:
                     return resp.content
     except Exception as exc:  # 网络问题都算取封面失败

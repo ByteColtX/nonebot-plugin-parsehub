@@ -71,6 +71,14 @@ def test_non_dict_json_falls_back(tmp_path: Path, switches) -> None:
     assert store.is_on(switches.group_key(1)) is True
 
 
+def test_non_bool_session_value_falls_back(tmp_path: Path, switches) -> None:
+    """会话值必须是 bool；0 / "false" 不能靠 bool() 猜。"""
+    path = tmp_path / "sessions.json"
+    path.write_text('{"schema": 2, "sessions": {"group:1": 0}}', "utf-8")
+    store = switches.SwitchStore(path)
+    assert store.is_on(switches.group_key(1)) is True
+
+
 def test_save_creates_parent_dir(tmp_path: Path, switches) -> None:
     """数据目录还不存在时要能自己建出来。"""
     store = switches.SwitchStore(tmp_path / "deep" / "nested" / "s.json")

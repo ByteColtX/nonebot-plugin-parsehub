@@ -74,3 +74,35 @@ def test_settings_without_whitelist_allows_everything(
     settings = plugin.config.Settings.from_config(config_mod())
     assert settings.allowed_platforms == frozenset()
     assert settings.platform_allowed("anything")
+
+
+@pytest.mark.parametrize("name", ["twitter", "Twitter", "X", "x"])
+def test_x_whitelist_uses_upstream_id(plugin, config_mod, name) -> None:
+    """X / Twitter 的 parsehub id 是 twitter，白名单不能归一成 x。"""
+    settings = plugin.config.Settings.from_config(
+        config_mod(parsehub_platforms=[name])
+    )
+    assert settings.allowed_platforms == {"twitter"}
+    assert settings.platform_allowed("twitter")
+
+
+def test_wechat_chinese_name_is_whitelisted(plugin, config_mod) -> None:
+    """「微信」有两个同展示名的 id，必须归一到上游的 weixin。"""
+    settings = plugin.config.Settings.from_config(
+        config_mod(parsehub_platforms=["微信"])
+    )
+    assert settings.allowed_platforms == {"weixin"}
+    assert settings.platform_allowed("weixin")
+
+
+def test_proxy_platforms_normalise_aliases(plugin, config_mod) -> None:
+    """代理列表和平台白名单用同一套别名，中文 / X 都能对上上游 id。"""
+    settings = plugin.config.Settings.from_config(
+        config_mod(
+            parsehub_proxy="http://127.0.0.1:7890",
+            parsehub_proxy_platforms=["小红书", "x"],
+        )
+    )
+    assert settings.proxy_for("xhs") == "http://127.0.0.1:7890"
+    assert settings.proxy_for("twitter") == "http://127.0.0.1:7890"
+    assert settings.proxy_for("douyin") == ""
