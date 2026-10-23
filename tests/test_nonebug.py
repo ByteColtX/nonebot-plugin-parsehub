@@ -220,3 +220,70 @@ async def test_auto_matcher_parses_bare_bv(
         ctx.should_finished()
 
     assert parsed_urls == ["https://www.bilibili.com/video/BV1xx411c7mD"]
+
+
+@pytest.mark.asyncio
+async def test_command_boundary_ignores_longer_word(
+    app: App, plugin, instance, matchers
+):
+    """「php...」不是 /ph 命令：命令名后紧贴字母不算边界，不能回用法。"""
+    event = make_group_event("php是世界上最好的语言。", message_id=6)
+
+    async with app.test_matcher(matchers.parse) as ctx:
+        bot = ctx.create_bot(
+            base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+        )
+        ctx.receive_event(bot, event)
+        ctx.should_not_pass_rule()
+
+
+@pytest.mark.asyncio
+async def test_command_boundary_ignores_chinese_continuation(
+    app: App, plugin, instance, matchers
+):
+    """「解析一下这个视频」是普通聊天，不是解析命令。"""
+    event = make_group_event("解析一下这个视频", message_id=7)
+
+    async with app.test_matcher(matchers.parse) as ctx:
+        bot = ctx.create_bot(
+            base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+        )
+        ctx.receive_event(bot, event)
+        ctx.should_not_pass_rule()
+
+
+@pytest.mark.asyncio
+async def test_command_boundary_keeps_alias_with_space(
+    app: App, plugin, monkeypatch, instance, matchers
+):
+    """命令名后是空白时照常匹配，别名 ph 不受影响。"""
+    _patch_parsehub(instance, monkeypatch, result=FakeParseResult())
+    event = make_private_event("ph https://b23.tv/abcd", message_id=8)
+
+    async with app.test_matcher(matchers.parse) as ctx:
+        bot = ctx.create_bot(
+            base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+        )
+        ctx.receive_event(bot, event)
+        ctx.should_call_api(
+            "set_msg_emoji_like",
+            {
+                "message_id": 8,
+                "emoji_id": plugin.feedback.Reaction.START,
+                "set": True,
+            },
+            result=None,
+        )
+        ctx.should_call_send(
+            event, Message("📦 哔哩哔哩\n标题\n正文"), result=None, bot=bot
+        )
+        ctx.should_call_api(
+            "set_msg_emoji_like",
+            {
+                "message_id": 8,
+                "emoji_id": plugin.feedback.Reaction.OK,
+                "set": True,
+            },
+            result=None,
+        )
+        ctx.should_finished()

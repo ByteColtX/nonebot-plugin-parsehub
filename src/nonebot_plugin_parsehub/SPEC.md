@@ -69,6 +69,9 @@ tags: [nonebot, parsehub, module]
 - 命令严格按 `COMMAND_START` 匹配：`should_auto` 不排除命令文本，靠命令匹配器的
   `priority=10` + `block=True` 先收口。裸写的「解析 <链接>」不是命令，按普通消息
   自动解析——默认前缀只有 `/`，若自动规则也跳过它，消息会被静默丢弃。
+  命令名后还要求词边界（`triggers.command_boundary`）：`TrieRule` 只做前缀匹配，
+  `COMMAND_START` 带空字符串时会把「php是世界上最好的语言」「解析一下」误判成命令，
+  必须让普通聊天落到自动规则或什么都不做。
 - `paths` 把 localstore 当硬依赖（`require` 后 import），不保留临时目录兜底。
 - 日志统一用 `nonebot.logger`：框架的 loguru 已经管住格式、插件标签与 `LOG_LEVEL`，
   在包内再桥接一层 stdlib logging 只是多一个可能失效的中间层。

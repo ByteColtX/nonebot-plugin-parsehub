@@ -24,7 +24,7 @@ from nonebot.adapters.onebot.v11 import (
     MessageEvent,
 )
 from nonebot.matcher import Matcher
-from nonebot.params import CommandArg
+from nonebot.params import CommandArg, RawCommand
 from nonebot.rule import Rule
 
 from . import keys
@@ -122,6 +122,32 @@ def can_control(event: MessageEvent) -> bool:
     return is_superuser(event) or is_group_admin(event)
 
 
+def command_boundary() -> Rule:
+    """要求命令名后面是一个词边界。
+
+    ``TrieRule`` 只做前缀匹配：``COMMAND_START`` 里带空字符串时，``ph`` 会把
+    「php是世界上最好的语言」也当成命令，``解析`` 会把「解析一下」当成命令，
+    于是普通聊天也会收到用法提示。这里要求命令名后紧跟空白、标点或消息结尾，
+    字母 / 数字 / 汉字都算命令的延续。
+
+    Returns:
+        可传给 ``on_command(rule=...)`` 的规则。
+    """
+
+    async def _checker(
+        event: MessageEvent, raw: str | None = RawCommand()
+    ) -> bool:
+        if not raw:
+            return False
+        rest = event.get_plaintext().lstrip()[len(raw) :]
+        if not rest:
+            return True
+        head = rest[0]
+        return not (head.isalnum() or head == "_")
+
+    return Rule(_checker)
+
+
 async def should_auto(app: App, event: MessageEvent) -> bool:
     """判断是否应该自动解析这条消息。
 
@@ -178,18 +204,21 @@ def create_matchers(app: App) -> Matchers:
     parse = on_command(
         "解析",
         aliases={"ph", "解析链接"},
+        rule=command_boundary(),
         priority=10,
         block=True,
     )
     platform_cmd = on_command(
         "解析平台",
         aliases={"ph平台", "解析支持"},
+        rule=command_boundary(),
         priority=10,
         block=True,
     )
     switch = on_command(
         "解析开关",
         aliases={"解析开", "解析关", "解析状态"},
+        rule=command_boundary(),
         priority=10,
         block=True,
     )
