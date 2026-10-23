@@ -8,7 +8,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
+
+
+@pytest.fixture(scope="session")
+def real_fetch_cover(plugin):
+    """在 autouse 的离线 mock 之前抓住真实实现。"""
+    return plugin.card.cover.fetch_cover
 
 
 class _StubFont:
@@ -205,3 +213,40 @@ def test_fallback_sources_are_pinned(card) -> None:
             assert len(source.sha256) == 64, source.url
             assert "/main/" not in source.url, f"还跟着分支走：{source.url}"
             assert "@master" not in source.url, f"还跟着分支走：{source.url}"
+
+
+def test_fetch_cover_skips_empty_url(
+    card, monkeypatch, real_fetch_cover
+) -> None:
+    """图片媒体没有 url 时跳过，不能中断后面的封面候选。"""
+    monkeypatch.setattr(card.cover, "fetch_cover", real_fetch_cover)
+    content = b"x" * 30_000
+    calls: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url: str):
+            calls.append(url)
+            if not url:
+                raise ValueError("empty url")
+            return SimpleNamespace(status_code=200, content=content)
+
+    monkeypatch.setattr(card.cover, "httpx", SimpleNamespace(Client=FakeClient))
+    result = SimpleNamespace(
+        media=[
+            SimpleNamespace(thumb_url=None, ext="jpg", url=""),
+            SimpleNamespace(
+                thumb_url=None, ext="jpg", url="https://example.test/a.jpg"
+            ),
+        ]
+    )
+    assert card.cover.fetch_cover(result, []) == content
+    assert calls == ["https://example.test/a.jpg"]

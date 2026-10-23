@@ -239,3 +239,32 @@ async def test_millisecond_platform_converts_before_checking(
         instance, bot2, make_group_event("https://xhslink.cn/o/abc"), URL
     )
     assert calls["download"] == 1, "8 秒的小红书视频不该被时长上限拦下"
+
+
+@pytest.mark.asyncio
+async def test_long_seconds_video_is_blocked(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """YouTube 这类秒单位的 4 小时视频不能被当成 14 秒放过去。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=14400,
+        platform_id="youtube",
+        display_name="YouTube",
+        media_mod=media_mod,
+    )
+    bot = FakeBot()
+    await service.handle(instance, bot, make_group_event(URL), URL)
+    assert "视频太长啦，还是去YouTube看吧" in bot.sent_texts, bot.sent_texts
+    assert calls["download"] == 0, "4 小时视频不该下载"
+
+
+def test_long_seconds_are_not_milliseconds(card, plugin) -> None:
+    """秒单位的 4 小时仍是 4 小时；只有明确的毫秒平台才除以 1000。"""
+    assert plugin.platforms.duration_seconds("youtube", [14400]) == 14400
+    assert card.layout.format_duration(14400) == "4:00:00"
+    assert plugin.platforms.duration_seconds("douyin", [14400]) == 14
+    assert card.layout.format_duration(14400, is_ms=True) == "00:14"

@@ -425,7 +425,7 @@ def format_duration(seconds: int, *, is_ms: bool = False) -> str:
     """
     if seconds <= 0:
         return ""
-    if is_ms or seconds > 10800:
+    if is_ms:
         seconds //= 1000
     minutes, sec = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)

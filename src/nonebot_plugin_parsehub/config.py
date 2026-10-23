@@ -173,7 +173,7 @@ class Settings:
             concurrency=cfg.parsehub_concurrency,
             proxy=cfg.parsehub_proxy.strip(),
             proxy_platforms=frozenset(
-                item.strip().lower()
+                normalise_platform(item)
                 for item in cfg.parsehub_proxy_platforms
                 if item.strip()
             ),
@@ -211,7 +211,7 @@ class Settings:
         """
         if not self.allowed_platforms:
             return True
-        return platform_id.lower() in self.allowed_platforms
+        return normalise_platform(platform_id) in self.allowed_platforms
 
     def proxy_for(self, platform_id: str) -> str:
         """该平台要不要走代理。
@@ -226,7 +226,7 @@ class Settings:
             return ""
         if (
             self.proxy_platforms
-            and platform_id.lower() not in self.proxy_platforms
+            and normalise_platform(platform_id) not in self.proxy_platforms
         ):
             return ""
         return self.proxy

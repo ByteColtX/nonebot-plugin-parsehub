@@ -48,13 +48,14 @@ PLATFORMS: dict[str, tuple[str, tuple[int, int, int], str]] = {
     "bangumi": ("Bangumi", (245, 145, 180), "bilibili"),
 }
 
-# 平台白名单里允许写的别名（parsehub 的 id 是 xhs / weixin / x，容易写错）。
+# 平台白名单里允许写的别名（parsehub 的 id 是 xhs / weixin / twitter）。
 PLATFORM_ALIASES: dict[str, str] = {
     "xiaohongshu": "xhs",
     "red": "xhs",
     "小红书": "xhs",
     "wechat": "weixin",
-    "twitter": "x",
+    "微信": "weixin",
+    "x": "twitter",
     "哔哩哔哩": "bilibili",
     "b站": "bilibili",
     "抖音": "douyin",
@@ -84,9 +85,6 @@ WATCH_NAMES: dict[str, str] = {
 # 新平台要实测：下载媒体用 cv2 量真实时长核对（TikTok 就是这样确认是秒的——
 # 报告 12，cv2 量出 30fps × 366 帧 = 12.20s，早先当毫秒会显示成 00:00）。
 MS_PLATFORMS = frozenset({"douyin", "xhs"})
-
-# 超过这个值（秒）的 duration 也按毫秒处理，与 format_duration 的显示规则一致。
-_MAX_PLAUSIBLE_SECONDS = 10800
 
 
 def normalise_platform(name: str) -> str:
@@ -169,6 +167,6 @@ def duration_seconds(platform_id: str, durations: Iterable[int]) -> int:
             continue
     if longest <= 0:
         return 0
-    if uses_milliseconds(platform_id) or longest > _MAX_PLAUSIBLE_SECONDS:
+    if uses_milliseconds(platform_id):
         return longest // 1000
     return longest

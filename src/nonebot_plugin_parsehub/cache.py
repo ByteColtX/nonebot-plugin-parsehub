@@ -445,7 +445,20 @@ class MediaCache:
             data = json.loads(path.read_text("utf-8"))
         except (OSError, ValueError):
             return None
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            return None
+        try:
+            float(data.get("updated_at") or 0)
+            int(data.get("seconds") or 0)
+        except (TypeError, ValueError):
+            return None
+        keys = data.get("keys")
+        if keys is not None and (
+            not isinstance(keys, (list, tuple))
+            or any(not isinstance(key, str) for key in keys)
+        ):
+            return None
+        return data
 
     def _write_meta(self, entry: Path, meta: dict) -> None:
         """原子写 meta.json。
