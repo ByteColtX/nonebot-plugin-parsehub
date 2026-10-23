@@ -95,7 +95,6 @@ class FakeDownloadResult:
         self.media = (
             media if media is not None else [FakeMediaFile(p) for p in files]
         )
-        self.output_dir = files[0].parent if files else Path("/tmp")
 
 
 @pytest.fixture()
