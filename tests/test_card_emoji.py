@@ -3,7 +3,8 @@
 
 """卡片彩色 emoji 的离线测试。
 
-emoji 字体是 1.5MB 的 Twemoji Mozilla，不进仓库，所以真正渲染的用例在没有字体时跳过。
+emoji 字体约 3MB，不进仓库；用 ``scripts/fetch_emoji_font.py`` 下载，或通过
+``PARSEHUB_EMOJI_FONT`` 指定路径后，真实渲染的用例才会跑，否则跳过。
 """
 
 from __future__ import annotations
@@ -13,13 +14,19 @@ from pathlib import Path
 
 import pytest
 from PIL import Image, ImageDraw
+from platformdirs import user_cache_path
 
-# 本机手动放一份 emoji 字体时，这个用例会真的跑起来；CI 上跳过。
-_EMOJI_FONT_HINT = Path(
-    os.environ.get(
-        "PARSEHUB_EMOJI_FONT", "~/.cache/nonebot2/parsehub/emoji-test.ttf"
-    )
-).expanduser()
+# 本地（LOCALSTORE_USE_CWD=true）和平台默认缓存目录都找一遍。
+_CANDIDATES = (
+    Path.cwd() / "cache" / "nonebot_plugin_parsehub" / "emoji-test.ttf",
+    user_cache_path("nonebot2") / "nonebot_plugin_parsehub" / "emoji-test.ttf",
+)
+_OVERRIDE = os.environ.get("PARSEHUB_EMOJI_FONT")
+_EMOJI_FONT_HINT = (
+    Path(_OVERRIDE).expanduser()
+    if _OVERRIDE
+    else next((path for path in _CANDIDATES if path.exists()), _CANDIDATES[0])
+)
 
 
 def test_split_emoji_keeps_zwj_sequence(card) -> None:
