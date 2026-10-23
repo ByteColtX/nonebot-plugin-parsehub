@@ -21,17 +21,16 @@ from pathlib import Path
 import httpx
 import nonebot
 
-# 插件的配置类依赖 NoneBot 已初始化；媒体目录交给 localstore 管理。
-nonebot.init(parsehub_relay_port=18899)
-nonebot.load_plugin("nonebot_plugin_localstore")
-
+# 先让仓库里的 src 进 sys.path，再让 NoneBot 正常加载插件。不能直接
+# ``from nonebot_plugin_parsehub import ...``：那样插件没有注册进 NoneBot，
+# localstore 会找不到调用方（RuntimeError: Cannot detect caller plugin）。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from nonebot_plugin_parsehub import (  # noqa: E402
-    parsehub_client,
-    paths,
-    relay,
-)
+nonebot.init()
+_plugin = nonebot.load_plugin("nonebot_plugin_parsehub")
+if _plugin is None:
+    raise SystemExit("加载 nonebot_plugin_parsehub 失败")
+_APP = _plugin.module.APP
 
 _DEFAULT_URL = "https://www.bilibili.com/video/BV1GJ411x7h7"
 _CHECK_PORT = 18899
@@ -47,8 +46,8 @@ async def main() -> int:
     Returns:
         进程退出码，0 表示链路正常。
     """
-    client = parsehub_client.ParseHubClient()
-    media_relay = relay.MediaRelay(paths.relay_root())
+    client = _APP.client
+    media_relay = _APP.relay
 
     print("== 1. 加载 parsehub ==")
     platforms = await client.platforms()
@@ -66,6 +65,9 @@ async def main() -> int:
     media = downloaded.media
     media_list = list(media) if isinstance(media, (list, tuple)) else [media]
     files = [Path(item.path) for item in media_list]
+    if not files:
+        print("   没有下载到媒体")
+        return 1
     for path in files:
         size = path.stat().st_size / _BYTES_PER_MEGABYTE
         print(f"   {path.name}  {size:.1f} MB")
