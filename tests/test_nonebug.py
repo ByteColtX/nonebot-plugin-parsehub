@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import nonebot
 import pytest
 from fake import make_group_event, make_private_event
 from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 from nonebot.adapters.onebot.v11 import Bot, Message
+from nonebot.rule import PREFIX_KEY, RAW_CMD_KEY
 from nonebug import App
 
 
@@ -287,3 +289,31 @@ async def test_command_boundary_keeps_alias_with_space(
             result=None,
         )
         ctx.should_finished()
+
+
+@pytest.mark.asyncio
+async def test_command_boundary_with_slash_prefix(
+    app: App, plugin, instance, matchers
+):
+    """默认的 / 前缀下，/php... 也不能被当成 /ph 命令。"""
+    event = make_group_event("/php是世界上最好的语言。", message_id=9)
+
+    async with app.test_matcher(matchers.parse) as ctx:
+        bot = ctx.create_bot(
+            base=Bot, adapter=nonebot.get_adapter(OnebotV11Adapter)
+        )
+        ctx.receive_event(bot, event)
+        ctx.should_not_pass_rule()
+
+
+@pytest.mark.asyncio
+async def test_command_boundary_rule_handles_slash_prefix(plugin, triggers):
+    """直接检查规则：/ph 后接空白放行，紧贴字母拒绝。"""
+    rule = triggers.command_boundary()
+    bot = Bot(adapter=MagicMock(), self_id="10000")
+    state = {PREFIX_KEY: {RAW_CMD_KEY: "/ph"}}
+
+    assert await rule(bot, make_group_event("/ph https://b23.tv/abcd"), state)
+    assert not await rule(
+        bot, make_group_event("/php https://b23.tv/abcd"), state
+    )
