@@ -24,25 +24,21 @@ ALLOWED_HOSTS: tuple[str, ...] = (
     "bgm.tv",
     "bili2233.cn",
     "bilibili.com",
-    "channels.weixin.qq.com",
+    "chii.in",
     "chenzhongtech.com",
     "coolapk.com",
     "douban.com",
     "douc.cc",
     "douyin.com",
     "facebook.com",
-    "fb.watch",
     "fixupx.com",
-    "iesdouyin.com",
+    "h5.pipix.com",
     "instagram.com",
-    "ixigua.com",
     "kuaishou.com",
     "medium.com",
-    "mp.weixin.qq.com",
-    "pipix.com",
+    "xiaochuankeji.cn",
     "snapchat.com",
     "threads.com",
-    "threads.net",
     "tieba.baidu.com",
     "tiktok.com",
     "toutiao.com",
@@ -51,7 +47,6 @@ ALLOWED_HOSTS: tuple[str, ...] = (
     "weibo.com",
     "weixin.qq.com",
     "x.com",
-    "xiaochuankeji.cn",
     "xiaoheihe.cn",
     "xiaohongshu.com",
     "xhslink.cn",
@@ -59,7 +54,140 @@ ALLOWED_HOSTS: tuple[str, ...] = (
     "youtu.be",
     "youtube.com",
     "zhihu.com",
-    "zuiyou.com",
+)
+
+# 短链域名：路径本身没有作品信息，展开后才知道指向什么，
+# 所以只做域名过滤，不再套 URL 形状。
+_SHORT_HOSTS = frozenset(
+    {"b23.tv", "bili2233.cn", "douc.cc", "xhslink.com", "xhslink.cn"}
+)
+
+# 内容域名的 URL 形状：对齐 ParseHub 各解析器的 __match__。
+# 只有形状也对得上才触发解析，避免“见到链接就触发”。
+_URL_SHAPES: tuple[re.Pattern[str], ...] = (
+    # B 站视频 / 专栏 / 动态
+    re.compile(
+        r"^https?://(www\.|m\.|t\.)?bilibili\.com/"
+        r"(video/|opus/|\d{18,19})",
+        re.IGNORECASE,
+    ),
+    # B 站直播间（插件自己处理，上游不支持）
+    re.compile(r"^https?://live\.bilibili\.com/\d+", re.IGNORECASE),
+    # Bangumi / bgm.tv / chii.in
+    re.compile(
+        r"^https?://(www\.)?(bgm\.tv|bangumi\.tv|chii\.in)/"
+        r"(subject/topic|group/topic|rakuen/topic/(subject|group)|blog)/\d+",
+        re.IGNORECASE,
+    ),
+    # 酷安动态 / 图片
+    re.compile(r"^https?://www\.coolapk\.com/(feed|picture)/", re.IGNORECASE),
+    # 豆瓣话题 / 分享跳转
+    re.compile(
+        r"^https?://(www\.|m\.)?douban\.com/"
+        r"((group/)?topic/\d+|doubanapp/dispatch)",
+        re.IGNORECASE,
+    ),
+    # 抖音：排除个人主页与汽水音乐
+    re.compile(
+        r"^https?://[^/]*douyin\.com/(?!share/user|qishui).+",
+        re.IGNORECASE,
+    ),
+    # Facebook
+    re.compile(
+        r"^https?://[^/]*facebook\.com/"
+        r"(watch\?v|share/[vr]|[^/]+/videos/|reel/)",
+        re.IGNORECASE,
+    ),
+    # Instagram
+    re.compile(
+        r"^https?://(www\.)?instagram\.com/"
+        r"(p|reel|reels|share|[^/]+/(p|reel))/",
+        re.IGNORECASE,
+    ),
+    # 快手
+    re.compile(
+        r"^https?://(www|v|live|v\.m|[a-z0-9]+\.m)\."
+        r"(kuaishou|chenzhongtech)\.com/.+",
+        re.IGNORECASE,
+    ),
+    # Medium 文章
+    re.compile(
+        r"^https?://([\w-]+\.)?medium\.com/(.+/)?"
+        r"([^/?#]*-)?[0-9a-f]{8,12}(/|\?|#|$)",
+        re.IGNORECASE,
+    ),
+    # 皮皮虾
+    re.compile(r"^https?://h5\.pipix\.com/(s|ppx/item)/.+", re.IGNORECASE),
+    # Snapchat
+    re.compile(
+        r"^https?://(www\.)?snapchat\.com/@([a-zA-Z0-9._-]+)"
+        r"(/spotlight)?/([a-zA-Z0-9_-]+)",
+        re.IGNORECASE,
+    ),
+    # Threads
+    re.compile(
+        r"^https?://[^/]*threads\.com/(@[\w.]+/post|share)/",
+        re.IGNORECASE,
+    ),
+    # 贴吧
+    re.compile(r"^https?://[^/]*tieba\.baidu\.com/p/\d+", re.IGNORECASE),
+    # TikTok：排除个人主页与汽水音乐
+    re.compile(
+        r"^https?://[^/]*tiktok\.com/(?!share/user|qishui).+",
+        re.IGNORECASE,
+    ),
+    # 今日头条
+    re.compile(
+        r"^https?://(www|m)\.toutiao\.com/"
+        r"(article/\d+|video/\d+|w/\d+|group/\d+|item/\d+|a\d+|i\d+|is/\w+)",
+        re.IGNORECASE,
+    ),
+    # X / Twitter / fixupx
+    re.compile(
+        r"^https?://[^/]*(twitter|fixupx|x)\.com/.*/status(es)?/\d+",
+        re.IGNORECASE,
+    ),
+    # 微博：排除个人主页，保留 mapp API 形态
+    re.compile(
+        r"^https?://((m\.|video\.)?weibo\.(com|cn)/(?!u/).+"
+        r"|mapp\.api\.weibo\.cn/fx/.+)",
+        re.IGNORECASE,
+    ),
+    # 微信公众号文章
+    re.compile(r"^https?://mp\.weixin\.qq\.com/s/", re.IGNORECASE),
+    # 微信视频号
+    re.compile(
+        r"^https?://channels\.weixin\.qq\.com/"
+        r"finder-preview/pages/sph\?.*\bid=\w+",
+        re.IGNORECASE,
+    ),
+    # 微信 sph 分享
+    re.compile(r"^https?://weixin\.qq\.com/sph/\w+", re.IGNORECASE),
+    # 小黑盒
+    re.compile(
+        r"^https?://[^/]*xiaoheihe\.cn/(v3|app)/bbs/(app|link).+",
+        re.IGNORECASE,
+    ),
+    # 小红书
+    re.compile(r"^https?://[^/]*xiaohongshu\.com/.+", re.IGNORECASE),
+    # YouTube：排除直播 / 帖子 / 频道页
+    re.compile(
+        r"^https?://(www\.|m\.)?(youtube\.com/(?!live/|post/|@).+"
+        r"|youtu\.be/[0-9A-Za-z_-]{11})",
+        re.IGNORECASE,
+    ),
+    # 知乎
+    re.compile(
+        r"^https?://(www|zhuanlan|daily)\.zhihu\.com/"
+        r"(pin|question|p|story|appview/p)/",
+        re.IGNORECASE,
+    ),
+    # 最右
+    re.compile(
+        r"^https?://share\.xiaochuankeji\.cn/"
+        r"hybrid/share/post\?pid=\d+",
+        re.IGNORECASE,
+    ),
 )
 
 # 中文标点和引号不会出现在 URL 里，直接当作边界。
@@ -70,10 +198,14 @@ _URL_PATTERN = re.compile(
 _TRAILING_CHARS = "。，、；：！？)）】》\"'"
 
 # 平台内容的 ID 特征：命中就能把同一个作品的各种写法归一成同一个 key。
-# 顺序有意义，更具体的排前面（BV 号优先于 /video/ 里的数字）。
+# 顺序有意义，更具体的排前面（直播间 > 动态 > opus > BV > av）。
 _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # 直播间：live.bilibili.com/<room_id>，与视频共用 bilibili 平台但独立成 key
     ("bilibili_live", re.compile(r"live\.bilibili\.com/(\d+)")),
+    # B 站动态：18–19 位数字
+    ("bilibili", re.compile(r"bilibili\.com/(\d{18,19})(?:[/?#]|$)")),
+    # B 站专栏
+    ("bilibili", re.compile(r"/opus/(\d+)")),
     ("bilibili", re.compile(r"(BV[0-9A-Za-z]{10})")),
     ("bilibili", re.compile(r"/av(\d+)")),
     ("douyin", re.compile(r"/video/(\d{6,})")),
@@ -85,7 +217,14 @@ _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("youtube", re.compile(r"youtu\.be/([0-9A-Za-z_-]{11})")),
     ("youtube", re.compile(r"[?&]v=([0-9A-Za-z_-]{11})")),
     ("twitter", re.compile(r"/status(?:es)?/(\d+)")),
-    ("instagram", re.compile(r"/(?:p|reel|tv)/([0-9A-Za-z_-]+)")),
+    # Instagram：p / reel / tv / share，以及任意前缀下的 p / reel
+    (
+        "instagram",
+        re.compile(
+            r"/(?:p|reel|tv|share/(?:p|reel)"
+            r"|[^/]+/(?:p|reel))/([0-9A-Za-z_-]+)"
+        ),
+    ),
 )
 
 # 裸 BV 号：消息里只有作品号、没有链接时也当成 B 站视频。前后不能紧贴字母数字，
@@ -137,8 +276,29 @@ def _is_bilibili_short_host(host: str) -> bool:
     )
 
 
+def _shape_allowed(url: str) -> bool:
+    """判断链接是否落在已知的 URL 形状里。
+
+    短链域名直接放行；内容域名必须命中 :data:`_URL_SHAPES` 中的一条，
+    这样 ``bilibili.com``、``weibo.com`` 这类大站的首页 / 个人主页
+    不会再触发解析。
+
+    Args:
+        url: 链接。
+
+    Returns:
+        值得交给 ParseHub / 直播分支处理为 ``True``。
+    """
+    host = (urlsplit(url).hostname or "").lower()
+    if host.startswith("www."):
+        host = host[len("www.") :]
+    if host in _SHORT_HOSTS:
+        return True
+    return any(pattern.match(url) for pattern in _URL_SHAPES)
+
+
 def _iter_urls(text: str) -> Iterator[tuple[int, str]]:
-    """扫出文本里落在白名单域名上的链接。
+    """扫出文本里既在白名单域名、又符合已知形状的链接。
 
     Args:
         text: 消息纯文本，可以是分享文案。
@@ -151,14 +311,14 @@ def _iter_urls(text: str) -> Iterator[tuple[int, str]]:
         host = (urlsplit(url).hostname or "").lower()
         if host.startswith("www."):
             host = host[len("www.") :]
-        if host_allowed(host):
+        if host_allowed(host) and _shape_allowed(url):
             yield match.start(), url
 
 
 def extract_urls(text: str) -> list[str]:
     """从消息文本里挑出可能受支持的链接。
 
-    只做域名层面的粗筛，是否真的支持交给 ParseHub 判断。
+    先按域名白名单粗筛，再按 URL 形状精筛；短链域名只做域名判断。
 
     Args:
         text: 消息纯文本，可以是分享文案。
@@ -231,8 +391,9 @@ def content_key(url: str) -> str:
     认得出作品 ID 的平台直接用 ``平台:id``，这样同一个作品的两种写法能对上——比如
     抖音的 ``v.douyin.com/xxx`` 和 ``iesdouyin.com/share/video/<id>``、B 站的
     ``b23.tv/xxx`` 和 ``bilibili.com/video/BVxxxx``（解析结果里的 ``raw_url``
-    已经是短链展开后的地址）。B 站带 ``p`` 时把分P也写进 key，避免不同 P
-    撞缓存。认不出来的退化成「主机 + 路径」，丢掉查询串和末尾斜杠。
+    已经是短链展开后的地址）、B 站动态的 18–19 位 ID、专栏的 ``opus/<id>``。
+    B 站带 ``p`` 时把分P也写进 key，避免不同 P 撞缓存。认不出来的退化成
+    「主机 + 路径」，丢掉查询串和末尾斜杠。
 
     Args:
         url: 链接，可以是用户发的原始链接，也可以是 ParseHub 给的 ``raw_url``。
