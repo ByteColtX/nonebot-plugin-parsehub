@@ -209,6 +209,73 @@ def test_extract_urls_empty(plugin, keys):
     assert keys.extract_urls("今天天气不错，没有链接") == []
 
 
+def test_extract_urls_rejects_broad_homepages(plugin, keys):
+    """大站的首页 / 个人主页不再触发解析。"""
+    text = (
+        "首页 https://www.bilibili.com/ "
+        "微博 https://weibo.com/u/abc "
+        "频道 https://www.youtube.com/@someone "
+        "主页 https://www.tiktok.com/share/user/123"
+    )
+    assert keys.extract_urls(text) == []
+
+
+def test_extract_urls_ignores_removed_hosts(plugin, keys):
+    """上游不支持 / 只在特定子域支持的域名不再进白名单。"""
+    text = (
+        "https://iesdouyin.com/share/video/123 "
+        "https://fb.watch/abc "
+        "https://ixigua.com/abc "
+        "https://threads.net/abc "
+        "https://zuiyou.com/abc "
+        "https://pipix.com/abc "
+        "https://xiaochuankeji.cn/abc"
+    )
+    assert keys.extract_urls(text) == []
+
+
+def test_extract_urls_accepts_new_supported_shapes(plugin, keys):
+    """补齐的域名和形状都能触发解析。"""
+    text = (
+        "动态 https://t.bilibili.com/123456789012345678 "
+        "专栏 https://www.bilibili.com/opus/123 "
+        "Bangumi https://chii.in/subject/topic/123 "
+        "皮皮虾 https://h5.pipix.com/s/abc "
+        "最右 https://share.xiaochuankeji.cn/hybrid/share/post?pid=123"
+    )
+    urls = keys.extract_urls(text)
+    assert urls == [
+        "https://t.bilibili.com/123456789012345678",
+        "https://www.bilibili.com/opus/123",
+        "https://chii.in/subject/topic/123",
+        "https://h5.pipix.com/s/abc",
+        "https://share.xiaochuankeji.cn/hybrid/share/post?pid=123",
+    ]
+
+
+def test_content_key_bilibili_opus_and_dynamic(plugin, keys):
+    """B 站专栏和动态也能归一成独立 key。"""
+    assert (
+        keys.content_key("https://www.bilibili.com/opus/123") == "bilibili:123"
+    )
+    assert (
+        keys.content_key("https://t.bilibili.com/123456789012345678")
+        == "bilibili:123456789012345678"
+    )
+
+
+def test_content_key_instagram_prefixed_paths(plugin, keys):
+    """Instagram 的 share / 任意前缀路径也能归一成同一个作品。"""
+    assert (
+        keys.content_key("https://www.instagram.com/share/p/abc")
+        == "instagram:abc"
+    )
+    assert (
+        keys.content_key("https://www.instagram.com/user/p/abc")
+        == "instagram:abc"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # 1b. 裸 BV 号
 # --------------------------------------------------------------------------- #
