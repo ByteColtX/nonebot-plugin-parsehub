@@ -166,11 +166,10 @@ plugins = ["nonebot_plugin_parsehub"]
 uv sync --all-groups            # 安装依赖（含测试）
 uv run poe check                # 代码检查 + 格式检查 + 测试（CI 同款）
 uv run pytest -q                # 只跑测试
-uv run poe live                 # 真实链路自检（解析 → 下载 → 中转取回）
 ```
 
 架构与不变量见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；需求 / 模块 spec 已归档在
-`archive/specs` 分支，不再随 main 发布。
+`archive/specs` 分支，不随 main 发布。
 
 ### 代码结构
 

@@ -3,8 +3,8 @@
 
 """卡片彩色 emoji 的离线测试。
 
-emoji 字体约 3MB，不进仓库；用 ``scripts/fetch_emoji_font.py`` 下载，或通过
-``PARSEHUB_EMOJI_FONT`` 指定路径后，真实渲染的用例才会跑，否则跳过。
+emoji 字体约 3MB，不进仓库；真实渲染的用例只在字体已存在（或通过
+``PARSEHUB_EMOJI_FONT`` 指定路径）时才跑，否则跳过。
 """
 
 from __future__ import annotations
