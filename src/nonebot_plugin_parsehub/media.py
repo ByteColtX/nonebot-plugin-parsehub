@@ -47,6 +47,20 @@ VIDEO_EXTENSIONS = frozenset(
     }
 )
 
+# 音频扩展名：按 record 语音段投递（bm / ym 指令用）。
+AUDIO_EXTENSIONS = frozenset(
+    {
+        ".aac",
+        ".flac",
+        ".m4a",
+        ".mp3",
+        ".ogg",
+        ".opus",
+        ".wav",
+        ".weba",
+    }
+)
+
 # 一次最多发多少个媒体。图集动辄上百张，而每张都要等协议端上传到 QQ（实测约
 # 2s/张且串行），下载也慢：全发既会顶穿总超时，也会把合并转发拖到超时后逐条
 # 刷屏。超出部分直接不发，只发前 MAX_MEDIA_ITEMS 个。
@@ -61,6 +75,7 @@ class MediaKind(StrEnum):
 
     IMAGE = "image"
     VIDEO = "video"
+    RECORD = "record"
     FILE = "file"
 
 
@@ -103,13 +118,15 @@ def kind_of(path: Path) -> MediaKind:
         path: 本地文件路径。
 
     Returns:
-        图片 / 视频 / 其他文件。
+        图片 / 视频 / 语音 / 其他文件。
     """
     suffix = path.suffix.lower()
     if suffix in IMAGE_EXTENSIONS:
         return MediaKind.IMAGE
     if suffix in VIDEO_EXTENSIONS:
         return MediaKind.VIDEO
+    if suffix in AUDIO_EXTENSIONS:
+        return MediaKind.RECORD
     return MediaKind.FILE
 
 

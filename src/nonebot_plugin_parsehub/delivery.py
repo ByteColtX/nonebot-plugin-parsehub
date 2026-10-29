@@ -414,6 +414,8 @@ class Delivery:
                 await sender.send(event, MessageSegment.image(file=ref))
             elif file.kind is MediaKind.VIDEO:
                 await sender.send(event, MessageSegment.video(file=ref))
+            elif file.kind is MediaKind.RECORD:
+                await sender.send(event, MessageSegment.record(file=ref))
             elif not await self._send_file(sender, event, ref, file.path.name):
                 return False
         except ActionFailed as exc:
@@ -485,7 +487,7 @@ class Delivery:
         name = await asyncio.to_thread(forward_node_name)
         nodes: list[dict] = []
         for file in files:
-            if file.kind is MediaKind.FILE:
+            if file.kind in (MediaKind.FILE, MediaKind.RECORD):
                 return False
             ref = await self.ref(file.path)
             nodes.append(
@@ -547,6 +549,33 @@ class Delivery:
         """
         if file.kind is MediaKind.VIDEO:
             return "⚠️ 视频发送失败（协议端拒绝了 video 消息段）"
+        if file.kind is MediaKind.RECORD:
+            return "⚠️ 语音发送失败（协议端拒绝了 record 消息段）"
         if file.kind is MediaKind.FILE:
             return "⚠️ 文件发送失败"
         return "⚠️ 图片发送失败"
+
+    async def send_file_audio(
+        self,
+        sender: Sender,
+        event: MessageEvent,
+        file: MediaFile,
+    ) -> bool:
+        """以群文件 / 私聊文件的形式上传音频（bm / ym 的 -f 模式）。
+
+        Args:
+            sender: 协议端接口。
+            event: 触发消息事件。
+            file: 待上传的音频文件（文件名已是清洗后的标题）。
+
+        Returns:
+            上传成功返回 True。
+        """
+        try:
+            ref = await self.ref(file.path)
+            return await self._send_file(sender, event, ref, file.path.name)
+        except Exception as exc:  # 协议端行为不确定，统一兜底
+            logger.warning(
+                f"[parsehub] 音频文件上传失败: {type(exc).__name__}: {exc}"
+            )
+            return False

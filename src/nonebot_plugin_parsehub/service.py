@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, MessageEvent
 
-from . import errors, feedback, keys, live, media, platforms
+from . import audio, errors, feedback, keys, live, media, platforms
 from .budget import Budget
 from .cache import CacheEntry
 from .delivery import MediaReport, Sender
@@ -701,3 +701,233 @@ def _excerpt(text: str, limit: int) -> str:
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[:limit] + "…"
+
+
+async def handle_audio(
+    app: App,
+    sender: Sender,
+    event: MessageEvent,
+    target: str,
+    platform: str,
+    *,
+    as_file: bool = False,
+) -> Result:
+    """下载一个视频的音频并发出去（bm / ym 指令）。
+
+    与 :func:`handle` 共用结局、表情与提示约定，但不走 ParseHub：B 站直接调
+    playurl 接口，YouTube 直接调 yt-dlp。缓存 key 加 ``audio:`` 前缀，与
+    视频缓存互不干扰；时长上限不适用（音频按体积限制）。
+
+    Args:
+        app: 插件实例。
+        sender: 协议端接口。
+        event: 触发消息事件。
+        target: 目标链接（已归一成标准链接 / 短链）。
+        platform: 平台 id（``bilibili`` / ``youtube``）。
+        as_file: True 以群文件 / 私聊文件发送，否则发 record 语音段。
+
+    Returns:
+        本次处理的结局。
+    """
+    settings = app.settings
+
+    # 平台白名单：被关掉的平台连「收到」都不点
+    if not settings.platform_allowed(platform):
+        logger.info(f"[parsehub] {platform} 不在解析白名单里，跳过音频")
+        await app.delivery.send_text(
+            sender, event, feedback.platform_off_notice(platform)
+        )
+        return Result(Outcome.PLATFORM_OFF)
+
+    key = audio.cache_key(target)
+    await feedback.react(sender, event, feedback.Reaction.START)
+
+    try:
+        async with app.semaphore:
+            result = await _deliver_audio(
+                app, sender, event, target, platform, key, as_file
+            )
+    except Exception as exc:  # 兜底：任何路径都要有终点
+        logger.exception(
+            f"[parsehub] 音频处理 {target} 时出现未预期异常: {exc}"
+        )
+        result = Result(
+            Outcome.INTERNAL_ERROR,
+            notice=feedback.internal_error_notice(),
+            keys=(key,),
+        )
+
+    if result.notice:
+        await app.delivery.send_text(sender, event, result.notice)
+    if result.outcome is not Outcome.DUPLICATE:
+        reaction = feedback.Reaction.OK if result.ok else feedback.Reaction.FAIL
+        await feedback.react(sender, event, reaction)
+    logger.info(f"[parsehub] 音频 {result.outcome}（{platform}）: {target}")
+    return result
+
+
+async def _deliver_audio(
+    app: App,
+    sender: Sender,
+    event: MessageEvent,
+    target: str,
+    platform: str,
+    key: str,
+    as_file: bool,
+) -> Result:
+    """在并发信号量内完成一次音频处理（不含表情与收尾）。"""
+    settings = app.settings
+
+    # 缓存命中：直接把那份音频发出去
+    cached = await asyncio.to_thread(app.cache.get, key)
+    if cached is not None:
+        return await _deliver_cached_audio(
+            app, sender, event, cached, key, as_file
+        )
+
+    proxy = settings.proxy_for(platform)
+    # cookies.toml 是同步磁盘读，放线程里
+    cookie = await asyncio.to_thread(platform_cookie, platform, settings.cookie)
+    budget = Budget(settings.timeout)
+
+    try:
+        if platform == "bilibili":
+            info = await asyncio.to_thread(audio.bilibili_audio, target, proxy)
+        else:
+            async with budget.timeout():
+                info = await asyncio.to_thread(
+                    audio.youtube_audio, target, proxy, cookie
+                )
+    except Exception as exc:
+        logger.warning(
+            f"[parsehub] 音频元信息获取失败 {target}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return Result(
+            Outcome.PARSE_FAILED,
+            notice=feedback.audio_failed_notice(exc),
+            keys=(key,),
+        )
+
+    if platform == "bilibili":
+        stem = audio.file_stem(info.title, info.bvid, info.part)
+        estimated = info.bandwidth // 8 * info.duration
+        if settings.max_file_bytes and estimated > settings.max_file_bytes:
+            logger.info(
+                f"[parsehub] 音频预估 {estimated / 1024 / 1024:.0f}MB "
+                f"超过上限，不下载: {target}"
+            )
+            return Result(
+                Outcome.TOO_LARGE,
+                notice=feedback.audio_too_large_notice(estimated),
+                keys=(key,),
+            )
+    else:
+        stem = audio.file_stem(info.title, info.video_id)
+
+    task_dir = app.relay.new_task_dir()
+    try:
+        if platform == "bilibili":
+            path = Path(
+                await asyncio.to_thread(
+                    audio.download_bilibili,
+                    info.audio_url,
+                    task_dir / f"{stem}.m4a",
+                    proxy,
+                    settings.max_file_bytes,
+                )
+            )
+        else:
+            async with budget.timeout():
+                path = await asyncio.to_thread(
+                    audio.youtube_download,
+                    info.webpage_url,
+                    task_dir,
+                    proxy,
+                    max(0.0, budget.remaining),
+                    settings.max_file_bytes,
+                    cookie,
+                )
+            # 命名成清洗后的标题（yt-dlp 落盘的是 <id>.<ext>）
+            named = path.with_name(f"{stem}{path.suffix}")
+            try:
+                await asyncio.to_thread(path.rename, named)
+                path = named
+            except OSError as exc:
+                logger.debug(f"[parsehub] 音频重命名失败（沿用原名）: {exc}")
+    except audio.AudioTooLarge:
+        return Result(
+            Outcome.TOO_LARGE,
+            notice=feedback.audio_too_large_notice(settings.max_file_bytes),
+            keys=(key,),
+        )
+    except Exception as exc:
+        logger.warning(
+            f"[parsehub] 音频下载失败 {target}: {type(exc).__name__}: {exc}"
+        )
+        return Result(
+            Outcome.DOWNLOAD_FAILED,
+            notice=feedback.download_failed_notice(exc),
+            keys=(key,),
+        )
+
+    # 下载完再核一次实际体积（B 站预估可能偏差）
+    try:
+        actual = await asyncio.to_thread(path.stat)
+        size = actual.st_size
+    except OSError:
+        size = 0
+    if settings.max_file_bytes and size > settings.max_file_bytes:
+        return Result(
+            Outcome.TOO_LARGE,
+            notice=feedback.audio_too_large_notice(size),
+            keys=(key,),
+        )
+
+    file = MediaFile(path=path, kind=media.kind_of(path), duration=0)
+    if as_file:
+        sent = await app.delivery.send_file_audio(sender, event, file)
+        report = MediaReport()
+        if sent:
+            report.sent.append(file)
+    else:
+        report = await app.delivery.send_media(sender, event, [file])
+        sent = report.ok
+    outcome = Outcome.DELIVERED if sent else Outcome.DELIVERY_FAILED
+    if sent:
+        await asyncio.to_thread(
+            app.cache.store,
+            (key,),
+            [path],
+            seconds=info.duration,
+        )
+    return Result(outcome, report=report, keys=(key,))
+
+
+async def _deliver_cached_audio(
+    app: App,
+    sender: Sender,
+    event: MessageEvent,
+    entry: CacheEntry,
+    key: str,
+    as_file: bool,
+) -> Result:
+    """把缓存里的音频按当次模式发出去。"""
+    await asyncio.to_thread(app.cache.remember_key, entry.root, key)
+    files = [
+        MediaFile(path=path, kind=media.kind_of(path)) for path in entry.files
+    ]
+    if not files:
+        return Result(Outcome.NO_MEDIA, keys=(key,))
+    file = files[0]
+    if as_file:
+        sent = await app.delivery.send_file_audio(sender, event, file)
+        report = MediaReport()
+        if sent:
+            report.sent.append(file)
+    else:
+        report = await app.delivery.send_media(sender, event, [file])
+        sent = report.ok
+    outcome = Outcome.FROM_CACHE if sent else Outcome.DELIVERY_FAILED
+    logger.info(f"[parsehub] 命中音频缓存: {key}")
+    return Result(outcome, report=report, keys=(key, *entry.keys))

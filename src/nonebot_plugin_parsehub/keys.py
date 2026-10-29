@@ -170,9 +170,9 @@ _URL_SHAPES: tuple[re.Pattern[str], ...] = (
     ),
     # 小红书
     re.compile(r"^https?://[^/]*xiaohongshu\.com/.+", re.IGNORECASE),
-    # YouTube：排除直播 / 帖子 / 频道页
+    # YouTube：排除直播 / 帖子 / 频道页（music 子域也算）
     re.compile(
-        r"^https?://(www\.|m\.)?(youtube\.com/(?!live/|post/|@).+"
+        r"^https?://(www\.|m\.|music\.)?(youtube\.com/(?!live/|post/|@).+"
         r"|youtu\.be/[0-9A-Za-z_-]{11})",
         re.IGNORECASE,
     ),

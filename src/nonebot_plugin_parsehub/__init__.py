@@ -36,7 +36,9 @@ __plugin_meta__ = PluginMetadata(
     ),
     usage=(
         "发链接即可自动解析；命令：/解析 <链接或分享文案>、/解析平台、"
-        "/解析开关 [开|关]（超管 / 群管理）、/解析状态"
+        "/解析开关 [开|关]（超管 / 群管理）、/解析状态、"
+        "/bm <BV 号或 B 站链接>（B 站音频）、"
+        "/ym <YouTube 链接>（YouTube 音频），bm / ym 加 -f 以文件发送"
     ),
     type="application",
     homepage="https://github.com/ByteColtX/nonebot-plugin-parsehub",
