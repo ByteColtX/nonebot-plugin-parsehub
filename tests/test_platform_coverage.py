@@ -49,14 +49,16 @@ def upstream_platform_ids() -> set[str]:
 
 def test_every_upstream_platform_has_card_entry(card) -> None:
     """上游每个 platform.id 都要能在卡片里查到，否则图标会退回默认的 X。"""
-    missing = sorted(
-        pid for pid in upstream_platform_ids() if pid not in card.PLATFORMS
-    )
+    found = upstream_platform_ids()
+    assert found, "没有发现任何上游 parser，枚举逻辑失效"
+    assert "bilibili" in found, f"上游平台枚举不完整：{sorted(found)}"
+    missing = sorted(pid for pid in found if pid not in card.PLATFORMS)
     assert not missing, f"卡片平台表缺少这些 id：{missing}"
 
 
 def test_every_platform_logo_exists(card) -> None:
     """平台表里引用的 logo 文件必须真实存在。"""
+    assert card.PLATFORMS, "卡片平台表为空"
     missing = sorted(
         {
             logo
@@ -69,6 +71,7 @@ def test_every_platform_logo_exists(card) -> None:
 
 def test_platform_logo_is_loadable(card) -> None:
     """每个平台表里的 logo 都要能按尺寸画出来（防尺寸为 0 / 坏文件）。"""
+    assert card.PLATFORMS, "卡片平台表为空"
     for platform_id, (_, _, logo) in card.PLATFORMS.items():
         image = card.layout._logo(platform_id, 54)
         assert image.width > 0 and image.height == 54, (
