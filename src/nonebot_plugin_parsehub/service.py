@@ -8,13 +8,15 @@
 1. 平台白名单（命中才继续，否则连「收到」都不点）；
 2. 会话去重（claim，失败不记窗口）；
 3. 点「收到」表情；
-4. 缓存命中（作品级，跨会话共享）；
-5. 解析（共享超时预算）；
-6. 时长上限（超了只发封面 + 提示）；
-7. 下载（只在网络类失败时重试，超时不重试）；
-8. 卡片与下载并行，卡片失败再用下载好的文件补一次；
-9. 投递（体积过滤、合并转发、逐条兜底都在 delivery）；
-10. 只把**真正发出去**的媒体写进缓存。
+4. 直播间封面卡片（``live.bilibili.com`` 或短链展开后；成功即结束，
+   失败继续往下走常规失败路径）；
+5. 缓存命中（作品级，跨会话共享）；
+6. 解析（共享超时预算）；
+7. 时长上限（超了只发封面 + 一句提示）；
+8. 下载（只在网络类失败时重试，超时不重试）；
+9. 卡片与下载并行，卡片失败再用下载好的文件补一次；
+10. 投递（体积过滤、合并转发、逐条兜底都在 delivery）；
+11. 只把**真正发出去**的媒体写进缓存。
 
 最后按结局点成功 / 失败表情，并把要补发给用户的话放在 ``Result.notice``。
 """
@@ -31,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, MessageEvent
 
-from . import errors, feedback, keys, media, platforms
+from . import errors, feedback, keys, live, media, platforms
 from .budget import Budget
 from .cache import CacheEntry
 from .delivery import MediaReport, Sender
@@ -170,7 +172,12 @@ async def handle(
     settings = app.settings
     session = session_key(event)
     try:
-        platform = await app.client.platform_id(url) or ""
+        if live.is_live_url(url):
+            # 直播间不在 ParseHub 的平台表里，手动归到 bilibili，
+            # 让白名单 / 代理设置跟普通 B 站链接走同一套
+            platform = "bilibili"
+        else:
+            platform = await app.client.platform_id(url) or ""
     except Exception as exc:  # 平台识别失败按未知平台继续
         logger.warning(
             f"[parsehub] 平台识别失败 {url}: {type(exc).__name__}: {exc}"
@@ -254,11 +261,19 @@ async def _deliver(  # 顺序编排本身就是一条长流水线
     """
     settings = app.settings
 
+    # 直播间：标题 / 封面 / 状态随时在变，不走作品缓存，也不下载媒体，
+    # 只发一张封面卡片；出不了卡就继续往下，落到常规失败路径。
+    if live.is_live_url(url):
+        live_result = await _deliver_live(
+            app, sender, event, url, pre_key, settings.proxy_for(platform)
+        )
+        if live_result is not None:
+            return live_result
+
     # 本地已经有这个作品的媒体就直接发，省掉解析、下载和画卡。
     cached = await asyncio.to_thread(app.cache.get, pre_key)
     if cached is not None and not _cached_over_limit(cached, app):
         return await _deliver_cached(app, sender, event, cached, pre_key)
-
     try:
         supported = await app.client.is_supported(url)
     except Exception as exc:  # 判断失败就交给解析去报错
@@ -285,6 +300,15 @@ async def _deliver(  # 顺序编排本身就是一条长流水线
         logger.warning(
             f"[parsehub] 解析失败 {url}: {type(exc).__name__}: {exc}"
         )
+        # B 站短链展开后可能是直播间，ParseHub 认不出来但封面卡片还能做
+        if live.is_short_link(url):
+            expanded = await asyncio.to_thread(live.expand_short, url, proxy)
+            if expanded and live.is_live_url(expanded):
+                live_result = await _deliver_live(
+                    app, sender, event, expanded, pre_key, proxy
+                )
+                if live_result is not None:
+                    return live_result
         notice = None
         if manual or failure.kind is errors.ErrorKind.UNAVAILABLE:
             notice = feedback.failure_notice(exc)
@@ -406,6 +430,51 @@ async def _deliver(  # 顺序编排本身就是一条长流水线
     )
     outcome = Outcome.DELIVERED if report.ok else Outcome.DELIVERY_FAILED
     return Result(outcome, report=report, keys=all_keys)
+
+
+async def _deliver_live(
+    app: App,
+    sender: Sender,
+    event: MessageEvent,
+    url: str,
+    pre_key: str,
+    proxy: str = "",
+) -> Result | None:
+    """直播间只发一张封面卡片，不走 ParseHub、不下载媒体。
+
+    标题、封面、开播状态随时在变，因此这里**不读也不写作品缓存**，只靠会话
+    去重拦重复。任何一步失败（接口挂了、封面取不到、卡片发不出去）都返回
+    ``None``，让调用方退回常规失败路径，而不是把半成品发出去。
+
+    Args:
+        app: 插件实例。
+        sender: 协议端接口。
+        event: 触发消息事件。
+        url: 直播间链接（短号 / 短链展开后的完整链都可以）。
+        pre_key: 原始链接的作品 key。
+        proxy: 请求直播接口与封面用的代理。
+
+    Returns:
+        卡片发出去时为对应的 :class:`Result`；发不出去时为 ``None``。
+    """
+    settings = app.settings
+    if not settings.card_enabled:
+        return None
+
+    info = await asyncio.to_thread(live.fetch_live, url, proxy)
+    if info is None:
+        return None
+
+    result = live.build_result(info)
+    out_path = await app.cards.render(result, [], None, proxy)
+    if out_path is None:
+        return None
+    if not await app.delivery.send_card(sender, event, out_path):
+        return None
+
+    post_key = keys.content_key(live.live_url(info.room_id))
+    logger.info(f"[parsehub] 直播间封面卡片已发送: {url}")
+    return Result(Outcome.DELIVERED, keys=(pre_key, post_key))
 
 
 async def _deliver_cached(

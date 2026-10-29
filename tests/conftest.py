@@ -113,6 +113,12 @@ def platforms(plugin):
 
 
 @pytest.fixture(scope="session")
+def live_mod(plugin):
+    """直播间封面模块。"""
+    return plugin.live
+
+
+@pytest.fixture(scope="session")
 def parsehub_client(plugin):
     """ParseHub 客户端模块。"""
     return plugin.parsehub_client

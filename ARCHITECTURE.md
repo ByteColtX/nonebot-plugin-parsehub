@@ -26,7 +26,7 @@ triggers ──► service ──► parsehub_client
 
 - **触发层**（`triggers`）：判断该不该处理、从消息里取链接、调用 `service.handle`。
 - **编排层**（`service`）：固定顺序的流水线，每个结局是 `Outcome` 的一个值。
-- **能力层**：`parsehub_client`（解析 / 下载）、`cache`、`dedupe`、`relay`、`card`。
+- **能力层**：`parsehub_client`（解析 / 下载）、`live`（B 站直播间封面卡片）、`cache`、`dedupe`、`relay`、`card`。
 - **投递层**（`delivery`）：三种上传模式、合并转发/逐条、失败记账。
 - **反馈层**（`feedback`）：表情与用户提示文案。
 - **装配层**（`app`）：构建、启动、清扫、关闭。
@@ -40,6 +40,8 @@ triggers ──► service ──► parsehub_client
 - **去重三态**：`claim`（进入时，含处理中集合）→ 成功 `commit` → 失败 `release`。
   手动命令不参与去重拦截，但成功后会记入窗口。
 - **缓存只收发出去的东西**：体积超限被跳过的媒体不写缓存；缓存条目按作品跨会话共享。
+- **直播不走作品缓存**：直播间的标题 / 封面 / 状态随时在变，只靠会话去重，
+  不读写 ``cache/media``；出不了卡就退回常规失败路径。
 - **缓存与中转分离**：缓存在 `cache/media`，中转只服务 `cache/relay`；投递时缓存文件
   硬链接进任务目录，缓存淘汰不会让消息发到一半文件消失。
 - **超时预算共享**：解析与下载共用一个 deadline；超时不重试，只有网络类失败才重试。
