@@ -148,3 +148,47 @@ def truncated_notice(total: int, sent: int) -> str:
         提示文案。
     """
     return f"（作品共 {total} 项，超过上限，只发前 {sent} 项）"
+
+
+def audio_too_large_notice(size: int) -> str:
+    """音频超过体积上限时的提示。
+
+    Args:
+        size: 预估或实际字节数。
+
+    Returns:
+        提示文案。
+    """
+    return (
+        f"音频约 {size / _BYTES_PER_MEGABYTE:.0f}MB，"
+        "超过体积上限，试试点歌短一点的。"
+    )
+
+
+def audio_usage_bili() -> str:
+    """Bm 命令的用法提示。"""
+    return "用法：bm <BV 号或 B 站链接>（-f 以文件发送）"
+
+
+def audio_usage_yt() -> str:
+    """Ym 命令的用法提示。"""
+    return "用法：ym <YouTube 链接或视频 ID>（-f 以文件发送）"
+
+
+def audio_av_hint() -> str:
+    """Bm 收到 av 号时的提示。"""
+    return "不支持 AV 号，请发 BV 号或视频链接。"
+
+
+def audio_failed_notice(exc: BaseException) -> str:
+    """音频获取 / 下载失败时的一句话。
+
+    Args:
+        exc: 抛出的异常。
+
+    Returns:
+        压平后的提示。
+    """
+    from .errors import short_error
+
+    return f"音频获取失败：{short_error(exc)}"

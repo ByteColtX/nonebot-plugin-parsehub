@@ -130,6 +130,12 @@ def switches(plugin):
     return plugin.switches
 
 
+@pytest.fixture(scope="session")
+def audio(plugin):
+    """音频能力模块。"""
+    return plugin.audio
+
+
 @pytest.fixture()
 def instance(plugin, tmp_path, monkeypatch):
     """每个测试一个独立实例：临时目录 + 假下载。"""
