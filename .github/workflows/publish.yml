@@ -22,8 +22,6 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
       - name: 安装依赖（严格按 uv.lock）
         run: uv sync --locked --all-groups
-      - name: 准备 emoji 测试字体
-        run: uv run python scripts/fetch_emoji_font.py
       - name: 跑测试
         run: uv run pytest -q
       - name: 代码检查
