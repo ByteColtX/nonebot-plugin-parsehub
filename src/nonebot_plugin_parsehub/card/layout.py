@@ -54,6 +54,8 @@ TYPE_LABELS: dict[str, str] = {
     "image": "图集",
     "multimedia": "图文",
     "richtext": "图文",
+    "live": "LIVE",
+    "offline": "OFFLINE",
 }
 
 # 版面参数
@@ -494,6 +496,9 @@ def platform_of(result: Any) -> tuple[str, tuple[int, int, int], str]:
 def meta_line(result: Any, media_count: int, is_ms: bool) -> str:
     """拼装元信息行（类型 · 时长 · 媒体数）。
 
+    直播间卡片走另一套文案：``LIVE · 主播名 · 房间 22603245``，
+    没有时长和媒体数可拼。
+
     Args:
         result: ParseHub 解析结果。
         media_count: 媒体数量。
@@ -502,8 +507,18 @@ def meta_line(result: Any, media_count: int, is_ms: bool) -> str:
     Returns:
         形如 ``视频 · 00:33`` 的一行文本。
     """
-    post_type = getattr(getattr(result, "type", None), "value", "")
-    parts = [TYPE_LABELS.get(str(post_type), "媒体")]
+    post_type = str(getattr(getattr(result, "type", None), "value", ""))
+    if post_type in ("live", "offline"):
+        parts = [TYPE_LABELS[post_type]]
+        author = str(getattr(result, "author", "") or "")
+        room_id = getattr(result, "room_id", "")
+        if author:
+            parts.append(author)
+        if room_id:
+            parts.append(f"房间 {room_id}")
+        return " · ".join(parts)
+
+    parts = [TYPE_LABELS.get(post_type, "媒体")]
     media = getattr(result, "media", None)
     items = list(media) if isinstance(media, (list, tuple)) else [media]
     first = next((item for item in items if item), None)

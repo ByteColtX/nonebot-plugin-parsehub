@@ -72,6 +72,8 @@ _TRAILING_CHARS = "。，、；：！？)）】》\"'"
 # 平台内容的 ID 特征：命中就能把同一个作品的各种写法归一成同一个 key。
 # 顺序有意义，更具体的排前面（BV 号优先于 /video/ 里的数字）。
 _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # 直播间：live.bilibili.com/<room_id>，与视频共用 bilibili 平台但独立成 key
+    ("bilibili_live", re.compile(r"live\.bilibili\.com/(\d+)")),
     ("bilibili", re.compile(r"(BV[0-9A-Za-z]{10})")),
     ("bilibili", re.compile(r"/av(\d+)")),
     ("douyin", re.compile(r"/video/(\d{6,})")),
