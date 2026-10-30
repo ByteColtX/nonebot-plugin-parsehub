@@ -399,19 +399,21 @@ class Delivery:
         try:
             segment = _segment(file, ref)
             if segment is None:  # 文件类没有对应消息段，走上传
-                if not await self._send_file(
-                    sender, event, ref, file.path.name
-                ):
-                    return False
-            else:
-                await sender.send(event, segment)
+                return await self._send_file(sender, event, ref, file.path.name)
+            await sender.send(event, segment)
         except ActionFailed as exc:
             logger.warning(f"[parsehub] 媒体被协议端拒绝: {exc}")
+            if file.kind is MediaKind.VIDEO:
+                # 部分协议端不支持 video 段，但能传群文件；别把能发的东西丢掉。
+                logger.info("[parsehub] video 段被拒，改走群文件")
+                return await self._send_file(sender, event, ref, file.path.name)
             return False
         except Exception as exc:  # 协议端行为不确定，统一兜底
             logger.warning(
                 f"[parsehub] 媒体发送异常: {type(exc).__name__}: {exc}"
             )
+            if file.kind is MediaKind.VIDEO:
+                return await self._send_file(sender, event, ref, file.path.name)
             return False
         return True
 
