@@ -37,6 +37,14 @@ class FakeRef:
         self.duration = kwargs.get("duration", 0)
 
 
+class FakeVideoRef(FakeRef):
+    """假视频引用（靠类名让卡片推断类型）。"""
+
+
+class FakeImageRef(FakeRef):
+    """假图片引用。"""
+
+
 class FakeType:
     """假 PostType。"""
 
@@ -127,6 +135,23 @@ def test_render_uses_content_when_title_missing(
     out = tmp_path / "weibo.jpg"
     assert card.layout.render(result, _cover_bytes(540, 960), out) is True
     assert "微博正文" in drawn
+
+
+def test_meta_line_multimedia_infers_media_type(card) -> None:
+    """最右统一返回 multimedia：单视频 / 纯图 / 混合分别标对。"""
+    video = FakeResult(media=FakeVideoRef(duration=0), post_type="multimedia")
+    assert card.layout.meta_line(video, 1, False) == "视频"
+
+    images = FakeResult(
+        media=[FakeImageRef(), FakeImageRef(), FakeImageRef()],
+        post_type="multimedia",
+    )
+    assert card.layout.meta_line(images, 3, False) == "图集 · 3 个媒体"
+
+    mixed = FakeResult(
+        media=[FakeVideoRef(), FakeImageRef()], post_type="multimedia"
+    )
+    assert card.layout.meta_line(mixed, 2, False) == "图文 · 2 个媒体"
 
 
 def test_meta_line_image_with_count(card) -> None:

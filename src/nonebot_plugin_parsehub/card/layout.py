@@ -123,6 +123,38 @@ def title_text(result: Any) -> str:
     return content or "(无标题)"
 
 
+def _media_label(post_type: str, items: list[Any]) -> str:
+    """根据媒体实际类型定卡片标签。
+
+    ParseHub 的最右解析器统一返回 ``multimedia``，单视频也会被标成「图文」；
+    这里按媒体类型纠正：纯视频 → 视频，纯图片 → 图集，混合 → 图文。
+
+    Args:
+        post_type: ParseHub 的帖子类型。
+        items: 媒体引用列表。
+
+    Returns:
+        卡片元信息里的类型文字。
+    """
+    if post_type in ("video", "image", "richtext"):
+        return TYPE_LABELS[post_type]
+    names = {type(item).__name__ for item in items}
+    # 允许测试 / 包装类用 FakeVideoRef 这类前缀，生产环境就是 VideoRef。
+    has_video = any(
+        name.endswith(("VideoRef", "LivePhotoRef")) for name in names
+    )
+    has_image = any(
+        name.endswith(("ImageRef", "AniRef", "LivePhotoRef")) for name in names
+    )
+    if has_video and has_image:
+        return "图文"
+    if has_video:
+        return "视频"
+    if has_image:
+        return "图集"
+    return TYPE_LABELS.get(post_type, "媒体")
+
+
 def meta_line(result: Any, media_count: int, is_ms: bool) -> str:
     """拼装元信息行（类型 · 时长 · 媒体数）。
 
@@ -160,9 +192,15 @@ def meta_line(result: Any, media_count: int, is_ms: bool) -> str:
             parts.append(duration)
         return " · ".join(parts)
 
-    parts = [TYPE_LABELS.get(post_type, "媒体")]
     media = getattr(result, "media", None)
-    items = list(media) if isinstance(media, (list, tuple)) else [media]
+    items = [
+        item
+        for item in (
+            list(media) if isinstance(media, (list, tuple)) else [media]
+        )
+        if item
+    ]
+    parts = [_media_label(post_type, items)]
     first = next((item for item in items if item), None)
     duration = format_duration(
         int(getattr(first, "duration", 0) or 0), is_ms=is_ms
