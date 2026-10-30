@@ -163,7 +163,8 @@ def test_extract_urls_accepts_new_supported_shapes(plugin, keys):
         "专栏 https://www.bilibili.com/opus/123 "
         "Bangumi https://chii.in/subject/topic/123 "
         "皮皮虾 https://h5.pipix.com/s/abc "
-        "最右 https://share.xiaochuankeji.cn/hybrid/share/post?pid=123"
+        "最右 https://share.xiaochuankeji.cn/hybrid/share/post?pid=123 "
+        "最右短链 https://s.izuiyou.com/s/23BpI"
     )
     urls = keys.extract_urls(text)
     assert urls == [
@@ -172,6 +173,7 @@ def test_extract_urls_accepts_new_supported_shapes(plugin, keys):
         "https://chii.in/subject/topic/123",
         "https://h5.pipix.com/s/abc",
         "https://share.xiaochuankeji.cn/hybrid/share/post?pid=123",
+        "https://s.izuiyou.com/s/23BpI",
     ]
 
 
@@ -363,6 +365,40 @@ def test_content_key_normalises_platform_ids(plugin, keys):
     assert (
         keys.content_key("https://b23.tv/3XdwepO") != bv
     )  # 短链只能等解析展开
+
+
+def test_content_key_zuiyou_and_xiaoheihe_share_ids(plugin, keys):
+    """最右 / 小黑盒的分享链接按作品 ID 归一，不能共用一个 key。"""
+    zuiyou_a = (
+        "https://share.xiaochuankeji.cn/hybrid/share/post"
+        "?pid=422153952&app=zuiyou"
+    )
+    zuiyou_b = (
+        "https://share.xiaochuankeji.cn/hybrid/share/post"
+        "?pid=426182135&app=zuiyou"
+    )
+    assert keys.content_key(zuiyou_a) == "zuiyou:422153952"
+    assert keys.content_key(zuiyou_b) == "zuiyou:426182135"
+    assert keys.content_key(zuiyou_a) != keys.content_key(zuiyou_b)
+    # 短链还没有 pid，至少要让两个短码各自成 key，不能都退化成同一个路径
+    assert keys.content_key("https://s.izuiyou.com/s/23BpI") == (
+        "s.izuiyou.com/s/23bpi"
+    )
+    assert keys.content_key("https://s.izuiyou.com/s/23BpI") != (
+        keys.content_key("https://s.izuiyou.com/s/23Bos")
+    )
+
+    xhh_a = (
+        "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=361771deb4c0"
+    )
+    xhh_b = (
+        "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=c31872bbe6e4"
+    )
+    assert keys.content_key(xhh_a) == "xiaoheihe:361771deb4c0"
+    assert keys.content_key(xhh_b) == "xiaoheihe:c31872bbe6e4"
+    assert keys.content_key(
+        "https://www.xiaoheihe.cn/app/bbs/link/361771deb4c0"
+    ) == keys.content_key(xhh_a)
 
 
 def test_content_key_falls_back_to_host_and_path(plugin, keys):
