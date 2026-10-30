@@ -82,6 +82,43 @@ async def test_media_with_caption_uses_one_forward(
 
 
 @pytest.mark.asyncio
+async def test_caption_only_in_first_batch(
+    plugin, instance, tmp_media: Path
+) -> None:
+    """超过一批时，正文只进第一批，后续批次只有媒体。"""
+    chunk = plugin.media.chunk_size(instance.settings.forward_timeout)
+    count = chunk + 5
+    files = []
+    for i in range(count):
+        path = tmp_media / f"c{i}.jpg"
+        path.write_bytes(b"x")
+        files.append(
+            plugin.media.MediaFile(path=path, kind=plugin.media.MediaKind.IMAGE)
+        )
+
+    bot = FakeBot()
+    await instance.delivery.send_media(
+        bot, make_group_event("x"), files, caption="酷安正文"
+    )
+
+    forwards = [
+        kwargs for api, kwargs in bot.calls if api == "send_group_forward_msg"
+    ]
+    assert [len(fwd["messages"]) for fwd in forwards] == [
+        chunk + 1,
+        count - chunk,
+    ]
+    assert forwards[0]["messages"][0]["data"]["content"] == [
+        {"type": "text", "data": {"text": "酷安正文"}}
+    ]
+    assert all(
+        node["data"]["content"][0]["type"] == "image"
+        for node in forwards[1]["messages"]
+    )
+    assert bot.sent_texts == []
+
+
+@pytest.mark.asyncio
 async def test_forward_failure_falls_back_to_separate_caption(
     plugin, instance, tmp_media: Path, monkeypatch
 ) -> None:

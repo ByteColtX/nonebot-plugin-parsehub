@@ -427,17 +427,18 @@ async def test_partial_failure_not_cached(
 
 
 async def test_truncated_notice_via_result(
-    instance, service, monkeypatch, tmp_path: Path
+    instance, service, media_mod, monkeypatch, tmp_path: Path
 ) -> None:
     """媒体数超上限的截断提示走 Result.notice，由 handle 统一发一次。"""
+    total = media_mod.MAX_MEDIA_ITEMS + 25
     files = []
-    for i in range(20):
+    for i in range(media_mod.MAX_MEDIA_ITEMS):
         path = tmp_path / f"m{i}.jpg"
         path.write_bytes(b"x" * 64)
         files.append(path)
     refs = [
         FakeMediaRef(f"https://cdn.example.com/m{i}.jpg", "jpg")
-        for i in range(25)
+        for i in range(total)
     ]
     _patch_parse(
         instance,
@@ -461,8 +462,11 @@ async def test_truncated_notice_via_result(
     result = await service.handle(instance, bot, make_group_event(URL), URL)
 
     assert result.notice is not None, "截断提示要走 Result.notice"
-    assert "作品共 25 项" in result.notice
-    notice_texts = [text for text in bot.sent_texts if "作品共 25 项" in text]
+    assert f"作品共 {total} 项" in result.notice
+    assert f"已发 {media_mod.MAX_MEDIA_ITEMS} 项" in result.notice
+    notice_texts = [
+        text for text in bot.sent_texts if f"作品共 {total} 项" in text
+    ]
     assert len(notice_texts) == 1, "截断提示只发一次"
 
     calls = bot.calls
@@ -470,7 +474,7 @@ async def test_truncated_notice_via_result(
         i
         for i, (api, kw) in enumerate(calls)
         if api == "send_msg"
-        and "作品共 25 项" in kw["message"].extract_plain_text()
+        and f"作品共 {total} 项" in kw["message"].extract_plain_text()
     )
     media_idx = next(
         i for i, (api, _) in enumerate(calls) if api == "send_group_forward_msg"

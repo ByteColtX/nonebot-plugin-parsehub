@@ -40,7 +40,7 @@ from nonebot.adapters.onebot.v11 import (
 from nonebot.adapters.onebot.v11.exception import ActionFailed
 
 from .config import Settings, forward_node_name
-from .media import MAX_MEDIA_ITEMS, MediaFile, MediaKind
+from .media import MAX_MEDIA_ITEMS, MediaFile, MediaKind, chunk_size
 from .relay import MediaRelay
 
 # 字节换算用的常数。
@@ -287,9 +287,10 @@ class Delivery:
     ) -> MediaReport:
         """发送解析出的媒体文件。
 
-        超过体积上限的文件直接跳过；多于一个文件时优先合并转发，失败或类型不合适
-        时退回逐条发送。传了 ``caption``（长正文）时，正文作为第一个节点和媒体
-        一起合并转发；即使只有一个媒体也走转发，避免正文和资源拆成两条消息。
+        超过体积上限的文件直接跳过；单个作品最多发送 ``MAX_MEDIA_ITEMS`` 个，
+        并按 :func:`~nonebot_plugin_parsehub.media.chunk_size` 分批合并转发。
+        每批内部优先合并转发，失败或类型不合适时退回逐条发送。传了 ``caption``
+        （长正文）时，正文只放在第一批的第一个节点。
 
         Args:
             sender: 协议端接口。
@@ -318,8 +319,36 @@ class Delivery:
         # 兜底：缓存命中的路径不经过上层截断，这里再保证一次
         items = items[:MAX_MEDIA_ITEMS]
 
-        # 引用只算一次：合并转发与逐条兜底共用同一份，base64 模式不会整文件
-        # 重读，file / http 模式不会重复建任务目录。拿不到引用（硬链接和
+        chunk = chunk_size(self.settings.forward_timeout)
+        for start in range(0, len(items), chunk):
+            await self._send_chunk(
+                sender,
+                event,
+                items[start : start + chunk],
+                caption if start == 0 else "",
+                report,
+            )
+        return report
+
+    async def _send_chunk(
+        self,
+        sender: Sender,
+        event: MessageEvent,
+        items: list[MediaFile],
+        caption: str,
+        report: MediaReport,
+    ) -> None:
+        """发送一批媒体，把成功 / 失败写进 ``report``。
+
+        Args:
+            sender: 协议端接口。
+            event: 触发消息事件。
+            items: 本批待发送的媒体。
+            caption: 本批要带的正文；只有第一批非空。
+            report: 本次投递的聚合结果。
+        """
+        # 引用只为本批构造：base64 模式不会一次把整个作品读进内存，
+        # file / http 模式也不会提前建太多任务目录。拿不到引用（硬链接和
         # 复制都失败）的文件直接记失败，不发必败的投递。
         refs: list[str] = []
         ready: list[MediaFile] = []
@@ -337,13 +366,16 @@ class Delivery:
                     await self.send_text(sender, event, self._fail_text(file))
         items, refs = ready, refs
         if not items:
-            return report
+            if caption:
+                # 这一批的引用全失败；正文不能跟着丢。
+                await self.send_text(sender, event, caption)
+            return
 
         if (len(items) > 1 or caption) and await self.send_forward(
             sender, event, items, refs, caption=caption
         ):
             report.sent.extend(items)
-            return report
+            return
 
         if caption:
             # 合并转发不可用：正文退回单独一条，媒体继续逐条发。
@@ -356,7 +388,6 @@ class Delivery:
                 report.failed.append(file)
                 if self.settings.fail_notice:
                     await self.send_text(sender, event, self._fail_text(file))
-        return report
 
     def _filter_by_size(
         self,

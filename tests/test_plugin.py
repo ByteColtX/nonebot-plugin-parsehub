@@ -1780,10 +1780,10 @@ async def test_auto_rule_accepts_miniprogram_card(plugin, instance, triggers):
 async def test_handle_link_caps_media_items(
     plugin, monkeypatch, tmp_media, instance, media_mod, service
 ):
-    """媒体超过上限时只下载并发送前 20 个，并回一句提示。"""
+    """媒体超过硬上限时只下载前 100 个，并按批转发。"""
     total = media_mod.MAX_MEDIA_ITEMS + 10
     pics = []
-    for i in range(total):
+    for i in range(media_mod.MAX_MEDIA_ITEMS):
         p = tmp_media / f"p{i}.jpg"
         p.write_bytes(b"x" * 512)
         pics.append(p)
@@ -1800,7 +1800,7 @@ async def test_handle_link_caps_media_items(
         return result
 
     async def fake_download(res, path, proxy=""):
-        # 下载拿到的 result 必须已经截断过，否则 30 张图会全被拉下来
+        # 下载拿到的 result 必须已经截断过，否则 110 张图会全被拉下来
         seen["media"] = len(res.media)
         return FakeDownloadResult(pics[: len(res.media)])
 
@@ -1817,12 +1817,22 @@ async def test_handle_link_caps_media_items(
     await service.handle(instance, bot, make_group_event(url), url)
 
     assert seen["media"] == media_mod.MAX_MEDIA_ITEMS, seen
-    fwd = dict(bot.calls)["send_group_forward_msg"]
-    assert len(fwd["messages"]) == media_mod.MAX_MEDIA_ITEMS
+    forwards = [kw for api, kw in bot.calls if api == "send_group_forward_msg"]
+    chunk = media_mod.chunk_size(instance.settings.forward_timeout)
+    expected = [chunk] * (media_mod.MAX_MEDIA_ITEMS // chunk)
+    if media_mod.MAX_MEDIA_ITEMS % chunk:
+        expected.append(media_mod.MAX_MEDIA_ITEMS % chunk)
+    assert [len(fwd["messages"]) for fwd in forwards] == expected
+    assert sum(len(fwd["messages"]) for fwd in forwards) == (
+        media_mod.MAX_MEDIA_ITEMS
+    )
     texts = [
         str(kw.get("message", "")) for api, kw in bot.calls if api == "send_msg"
     ]
-    assert any("只发前 20 项" in t for t in texts), texts
+    assert any(f"作品共 {total} 项" in t for t in texts), texts
+    assert any(f"已发 {media_mod.MAX_MEDIA_ITEMS} 项" in t for t in texts), (
+        texts
+    )
 
 
 @pytest.mark.asyncio
@@ -1841,8 +1851,71 @@ async def test_send_media_files_caps_items(
     bot = FakeBot()
     await instance.delivery.send_media(bot, make_group_event("x"), files)
 
-    fwd = dict(bot.calls)["send_group_forward_msg"]
-    assert len(fwd["messages"]) == media_mod.MAX_MEDIA_ITEMS
+    forwards = [kw for api, kw in bot.calls if api == "send_group_forward_msg"]
+    chunk = media_mod.chunk_size(instance.settings.forward_timeout)
+    expected = [chunk] * (media_mod.MAX_MEDIA_ITEMS // chunk)
+    if media_mod.MAX_MEDIA_ITEMS % chunk:
+        expected.append(media_mod.MAX_MEDIA_ITEMS % chunk)
+    assert [len(fwd["messages"]) for fwd in forwards] == expected
+    assert sum(len(fwd["messages"]) for fwd in forwards) == (
+        media_mod.MAX_MEDIA_ITEMS
+    )
+
+
+def test_media_chunk_size(media_mod):
+    """批大小由转发超时推导；默认 60s 对应 20 项。"""
+    assert media_mod.chunk_size(60) == 20
+    assert media_mod.chunk_size(30) == 10
+    assert media_mod.chunk_size(1) == 1
+    assert media_mod.chunk_size(600) == media_mod.MAX_MEDIA_ITEMS
+
+
+@pytest.mark.asyncio
+async def test_send_media_forward_failure_only_affects_one_batch(
+    plugin, tmp_media, instance, media_mod
+):
+    """某一批转发失败时只对这一批逐条兜底，后续批次仍走转发。"""
+    chunk = media_mod.chunk_size(instance.settings.forward_timeout)
+    count = chunk + 3
+    files = []
+    for i in range(count):
+        p = tmp_media / f"f{i}.jpg"
+        p.write_bytes(b"x" * 512)
+        files.append(
+            media_mod.MediaFile(path=p, kind=media_mod.MediaKind.IMAGE)
+        )
+
+    class FailFirstForwardBot(FakeBot):
+        def __init__(self) -> None:
+            super().__init__()
+            self.forwards = 0
+
+        async def call_api(self, api: str, **kwargs):
+            if api == "send_group_forward_msg":
+                self.forwards += 1
+                if self.forwards == 1:
+                    self.calls.append((api, kwargs))
+                    raise ActionFailed(
+                        status="failed",
+                        retcode=1200,
+                        data=None,
+                        message="first forward rejected",
+                    )
+            return await super().call_api(api, **kwargs)
+
+    bot = FailFirstForwardBot()
+    report = await instance.delivery.send_media(
+        bot, make_group_event("x"), files
+    )
+
+    forwards = [kw for api, kw in bot.calls if api == "send_group_forward_msg"]
+    assert bot.forwards == 2, "两批都应该尝试转发"
+    assert len(bot.sent_images) == chunk, "第一批逐条兜底"
+    assert [len(fwd["messages"]) for fwd in forwards] == [
+        chunk,
+        count - chunk,
+    ], "第一批失败，第二批仍合并转发"
+    assert len(report.sent) == count
 
 
 @pytest.mark.asyncio

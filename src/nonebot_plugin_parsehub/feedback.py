@@ -136,17 +136,18 @@ def too_large_notice(size: int) -> str:
     return f"文件约 {size / _BYTES_PER_MEGABYTE:.0f}MB，超过上限，已跳过。"
 
 
-def truncated_notice(total: int, sent: int) -> str:
+def truncated_notice(total: int, sent: int, limit: int) -> str:
     """媒体数量超过上限时的提示。
 
     Args:
         total: 作品里的媒体总数。
         sent: 实际发送的数量。
+        limit: 单次最多发送的数量。
 
     Returns:
         提示文案。
     """
-    return f"（作品共 {total} 项，超过上限，只发前 {sent} 项）"
+    return f"（作品共 {total} 项，单次最多 {limit} 项，已发 {sent} 项）"
 
 
 def audio_too_large_notice(size: int) -> str:
