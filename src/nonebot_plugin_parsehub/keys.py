@@ -45,6 +45,7 @@ ALLOWED_HOSTS: tuple[str, ...] = (
     "h5.pipix.com",
     "iesdouyin.com",
     "instagram.com",
+    "izuiyou.com",
     "kuaishou.com",
     "medium.com",
     "xiaochuankeji.cn",
@@ -193,10 +194,10 @@ _URL_SHAPES: tuple[re.Pattern[str], ...] = (
         r"(pin|question|p|story|appview/p)/",
         re.IGNORECASE,
     ),
-    # 最右
+    # 最右：分享长链与 s.izuiyou.com 短链
     re.compile(
-        r"^https?://share\.xiaochuankeji\.cn/"
-        r"hybrid/share/post\?pid=\d+",
+        r"^https?://(share\.xiaochuankeji\.cn/hybrid/share/post\?pid=\d+"
+        r"|s\.izuiyou\.com/s/\w+)",
         re.IGNORECASE,
     ),
 )
@@ -223,6 +224,14 @@ _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("douyin", re.compile(r"/note/(\d{6,})")),
     ("douyin", re.compile(r"[?&]modal_id=(\d{6,})")),
     ("kuaishou", re.compile(r"/(?:short-video|fw/photo)/([0-9A-Za-z_-]+)")),
+    # 最右长链的 pid / 小黑盒分享链的 link_id 都在查询串里；不取出来会让
+    # 所有分享链接共用一个 key，后续链接被误判成重复 / 直接命中上一份缓存。
+    (
+        "zuiyou",
+        re.compile(r"xiaochuankeji\.cn/[^?#]*[?&]pid=(\d+)"),
+    ),
+    ("xiaoheihe", re.compile(r"[?&]link_id=([0-9A-Za-z]+)")),
+    ("xiaoheihe", re.compile(r"/bbs/link/([0-9A-Za-z]+)")),
     ("xiaohongshu", re.compile(r"/(?:explore|discovery/item)/([0-9A-Za-z]+)")),
     ("weibo", re.compile(r"/(?:detail|status)/([0-9A-Za-z]+)")),
     ("youtube", re.compile(r"youtu\.be/([0-9A-Za-z_-]{11})")),
