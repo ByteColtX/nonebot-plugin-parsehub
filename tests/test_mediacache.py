@@ -1,16 +1,17 @@
 # Copyright 2026 ByteColtX
 # SPDX-License-Identifier: MIT
 
-"""媒体缓存的单元测试（纯文件操作，不依赖 nonebot）。"""
+"""媒体缓存与缓存命中路径的测试（既有纯文件操作，也有经 service 的端到端路径）。"""
 
-from __future__ import annotations
-
+import asyncio
 import json
 import os
 import time
 from pathlib import Path
 
 import pytest
+from fake import make_group_event
+from fakes import FakeBot, FakeParseResult
 
 
 def _files(tmp_path: Path, *names: str, size: int = 1024) -> list[Path]:
@@ -222,3 +223,43 @@ def test_broken_alias_is_cleaned(tmp_path: Path, cache) -> None:
     store.sweep()
     assert not primary.exists()
     assert not alias.exists()
+
+
+async def test_post_key_hit_respects_duration_limit(
+    instance, service, update_settings, monkeypatch, tmp_path: Path
+) -> None:
+    """短链展开后按 post_key 命中的缓存条目，也要过时长上限。
+
+    上限开大之前存进来的超时长条目，不能经短链 → 解析 → post_key 这条
+    命中路径直接发出去（首次命中有检查，这条漏了）。
+    """
+    media = tmp_path / "a.mp4"
+    media.write_bytes(b"media")
+    instance.cache.store(["bilibili:bv1a2xl67emp"], [media], seconds=300)
+    update_settings(max_seconds=60)
+
+    monkeypatch.setattr(
+        instance.client,
+        "platform_id",
+        lambda url: asyncio.sleep(0, result="bilibili"),
+    )
+    monkeypatch.setattr(
+        instance.client,
+        "is_supported",
+        lambda url: asyncio.sleep(0, result=True),
+    )
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(
+            raw_url="https://www.bilibili.com/video/BV1A2xL67EMP"
+        )
+
+    monkeypatch.setattr(instance.client, "parse", fake_parse)
+
+    bot = FakeBot()
+    url = "https://b23.tv/abcd"
+    result = await service.handle(instance, bot, make_group_event(url), url)
+
+    assert result.outcome is not service.Outcome.FROM_CACHE, (
+        "超时长的条目不能从缓存直接发"
+    )

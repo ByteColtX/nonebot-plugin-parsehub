@@ -215,13 +215,12 @@ async def test_card_image_follows_mode(
     monkeypatch.setattr(instance.cards, "render", fake_render)
 
     bot = RecordingBot()
-    info = await service._send_card_or_text(
+    info = await service.message.send_card_or_text(
         instance,
         bot,
         make_group_event("x"),
         object(),
         [],
-        tmp_media,
     )
 
     assert info.sent
@@ -248,7 +247,7 @@ async def test_cached_card_follows_mode(
     assert entry is not None
 
     bot = RecordingBot()
-    assert await service._deliver_cached(
+    assert await service.works._deliver_cached(
         instance, bot, make_group_event("x"), entry, "k"
     )
 

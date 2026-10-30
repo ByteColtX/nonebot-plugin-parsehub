@@ -13,6 +13,7 @@ matcher 由 :func:`create_matchers` 按传入的 ``App`` 创建，测试可以�
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -32,6 +33,7 @@ from .service import handle, handle_audio, session_key, session_name
 
 if TYPE_CHECKING:
     from .app import App
+    from .switches import SwitchStore
 
 MAX_LINKS_PER_MESSAGE = 3
 
@@ -125,6 +127,24 @@ def can_control(event: MessageEvent) -> bool:
     return is_superuser(event) or is_group_admin(event)
 
 
+async def _require_open(
+    matcher: type[Matcher],
+    event: MessageEvent,
+    switches: SwitchStore,
+) -> None:
+    """会话的解析被关、且来者无权限时，用同一句文案结束处理。
+
+    Args:
+        matcher: 要结束的 matcher。
+        event: 消息事件。
+        switches: 会话开关存储。
+    """
+    if not switches.is_on(session_key(event)) and not can_control(event):
+        await matcher.finish(
+            f"{session_name(event)}的解析已关闭，只有超管或群管理员能手动解析。"
+        )
+
+
 def command_boundary() -> Rule:
     """要求命令名后面是一个词边界。
 
@@ -200,7 +220,6 @@ def create_matchers(app: App) -> Matchers:
     Returns:
         注册好的 matcher 集合。
     """
-    settings = app.settings
     switches = app.switches
 
     auto = on_message(rule=auto_rule(app), priority=20, block=False)
@@ -243,13 +262,9 @@ def create_matchers(app: App) -> Matchers:
     async def _handle_auto(bot: Bot, event: MessageEvent) -> None:
         """自动解析消息里的链接。"""
         urls = keys.extract_targets(link_sources(event))
-        session = session_key(event)
         for url in urls[:MAX_LINKS_PER_MESSAGE]:
-            # 只看不记：记录由 service 负责；这里先静默跳过，免得白发「收到」
-            if app.dedupe.seen(
-                session, keys.content_key(url), settings.dedupe_seconds
-            ):
-                continue
+            # 去重拦截由 service 的 claim 统一负责（查 seen + in-flight），
+            # 这里不再预筛。
             await handle(app, bot, event, url)
 
     @parse.handle()
@@ -259,11 +274,7 @@ def create_matchers(app: App) -> Matchers:
         args: Message = CommandArg(),
     ) -> None:
         """处理 ``解析 <链接>`` 命令。"""
-        if not switches.is_on(session_key(event)) and not can_control(event):
-            await parse.finish(
-                f"{session_name(event)}的解析已关闭，"
-                "只有超管或群管理员能手动解析。"
-            )
+        await _require_open(parse, event, switches)
         text = args.extract_plain_text().strip() or link_sources(event)
         urls = keys.extract_targets(text)
         if not urls:
@@ -326,47 +337,54 @@ def create_matchers(app: App) -> Matchers:
             "手动解析也只有超管和群管理员能用。"
         )
 
-    @bm.handle()
-    async def _handle_bm(
-        bot: Bot,
-        event: MessageEvent,
-        args: Message = CommandArg(),
+    def _audio_handler(
+        cmd: type[Matcher],
+        platform_id: str,
+        extract: Callable[[str], str | None],
+        usage: Callable[[], str],
+        av_hint: Callable[[], str] | None = None,
     ) -> None:
-        """处理 ``bm <BV 号或 B 站链接>`` 命令。"""
-        if not switches.is_on(session_key(event)) and not can_control(event):
-            await bm.finish(
-                f"{session_name(event)}的解析已关闭，"
-                "只有超管或群管理员能手动解析。"
-            )
-        opts, rest = audio.parse_command(args.extract_plain_text())
-        target = audio.extract_bilibili(rest)
-        if target is None:
-            if audio.has_av_number(rest):
-                await bm.finish(feedback.audio_av_hint())
-            await bm.finish(feedback.audio_usage_bili())
-        await handle_audio(
-            app, bot, event, target, "bilibili", as_file=opts.as_file
-        )
+        """注册一个音频命令的处理器（bm / ym 共用同一套骨架）。
 
-    @ym.handle()
-    async def _handle_ym(
-        bot: Bot,
-        event: MessageEvent,
-        args: Message = CommandArg(),
-    ) -> None:
-        """处理 ``ym <YouTube 链接或视频 ID>`` 命令。"""
-        if not switches.is_on(session_key(event)) and not can_control(event):
-            await ym.finish(
-                f"{session_name(event)}的解析已关闭，"
-                "只有超管或群管理员能手动解析。"
+        Args:
+            cmd: 要注册到的命令 matcher。
+            platform_id: 平台 id（``bilibili`` / ``youtube``）。
+            extract: 从剩余文本里提取目标链接，提不到为 ``None``。
+            usage: 用法提示文案。
+            av_hint: 命中了 ``av`` 号这类近形输入时的提示；没有为 ``None``。
+        """
+
+        @cmd.handle()
+        async def _handler(
+            bot: Bot,
+            event: MessageEvent,
+            args: Message = CommandArg(),
+        ) -> None:
+            """门禁 → 提取目标 → 交给 :func:`handle_audio`。"""
+            await _require_open(cmd, event, switches)
+            as_file, rest = audio.parse_command(args.extract_plain_text())
+            target = extract(rest)
+            if target is None:
+                if av_hint is not None and audio.has_av_number(rest):
+                    await cmd.finish(av_hint())
+                await cmd.finish(usage())
+            await handle_audio(
+                app, bot, event, target, platform_id, as_file=as_file
             )
-        opts, rest = audio.parse_command(args.extract_plain_text())
-        target = audio.extract_youtube(rest)
-        if target is None:
-            await ym.finish(feedback.audio_usage_yt())
-        await handle_audio(
-            app, bot, event, target, "youtube", as_file=opts.as_file
-        )
+
+    _audio_handler(
+        bm,
+        "bilibili",
+        audio.extract_bilibili,
+        feedback.audio_usage_bili,
+        av_hint=feedback.audio_av_hint,
+    )
+    _audio_handler(
+        ym,
+        "youtube",
+        audio.extract_youtube,
+        feedback.audio_usage_yt,
+    )
 
     return Matchers(
         auto=auto,

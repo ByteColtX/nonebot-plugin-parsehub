@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 from fake import make_group_event
-from nonebot.adapters.onebot.v11.exception import ActionFailed
-from test_plugin import (
+from fakes import (
     FakeBot,
     FakeDownloadResult,
     FakeMediaFile,
     FakeMediaRef,
     FakeParseResult,
 )
+from nonebot.adapters.onebot.v11.exception import ActionFailed
 
 URL = "https://b23.tv/abcd"
 
@@ -288,7 +288,7 @@ async def test_unexpected_error_still_gets_a_terminal_signal(
     async def boom(*args, **kwargs):
         raise RuntimeError("内部炸了")
 
-    monkeypatch.setattr(service, "_deliver", boom)
+    monkeypatch.setattr(service.works, "deliver", boom)
 
     bot = FakeBot()
     result = await service.handle(instance, bot, make_group_event(URL), URL)
@@ -348,3 +348,134 @@ async def test_dedupe_window_zero_does_not_grow(
     assert first.outcome is service.Outcome.NO_MEDIA
     assert second.outcome is service.Outcome.NO_MEDIA, "窗口为 0 不该去重"
     assert instance.dedupe._seen == {}
+
+
+async def test_partial_failure_not_cached(
+    instance, service, monkeypatch, tmp_path: Path
+) -> None:
+    """部分媒体发送失败的作品不能写进缓存：下次命中会缺文件。"""
+
+    class RejectSecondBot(FakeBot):
+        """合并转发挂掉，第二个文件的逐条发送也被拒。"""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self._media_sends = 0
+
+        async def call_api(self, api, **kwargs):  # type: ignore[override]
+            if api == "send_group_forward_msg":
+                raise ActionFailed(
+                    status="failed",
+                    retcode=1200,
+                    data=None,
+                    message="no forward",
+                )
+            if api == "send_msg":
+                message = kwargs.get("message")
+                if message is not None and any(
+                    seg.type == "image"
+                    and str(seg.data.get("file", "")).endswith("two.jpg")
+                    for seg in message
+                ):
+                    self._media_sends += 1
+                    if self._media_sends >= 1:
+                        raise ActionFailed(
+                            status="failed",
+                            retcode=1200,
+                            data=None,
+                            message="second rejected",
+                        )
+            return await super().call_api(api, **kwargs)
+
+    first = tmp_path / "one.jpg"
+    second = tmp_path / "two.jpg"
+    first.write_bytes(b"x" * 512)
+    second.write_bytes(b"y" * 512)
+    refs = [
+        FakeMediaRef("https://cdn.example.com/one.jpg", "jpg"),
+        FakeMediaRef("https://cdn.example.com/two.jpg", "jpg"),
+    ]
+    _patch_parse(
+        instance,
+        monkeypatch,
+        parse=lambda url, proxy="", cookie="": asyncio.sleep(
+            0, result=FakeParseResult(media=refs)
+        ),
+    )
+    monkeypatch.setattr(
+        instance.client,
+        "download_parsed",
+        lambda result, path, proxy="", cookie="": asyncio.sleep(
+            0,
+            result=FakeDownloadResult(
+                [first, second],
+                media=[FakeMediaFile(first), FakeMediaFile(second)],
+            ),
+        ),
+    )
+
+    bot = RejectSecondBot()
+    result = await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert result.report is not None and result.report.failed, (
+        "第二个文件的失败要记进 report.failed"
+    )
+    assert instance.cache.get("b23.tv/abcd") is None, (
+        "部分失败的作品不能写进缓存"
+    )
+
+
+async def test_truncated_notice_via_result(
+    instance, service, monkeypatch, tmp_path: Path
+) -> None:
+    """媒体数超上限的截断提示走 Result.notice，由 handle 统一发一次。"""
+    files = []
+    for i in range(20):
+        path = tmp_path / f"m{i}.jpg"
+        path.write_bytes(b"x" * 64)
+        files.append(path)
+    refs = [
+        FakeMediaRef(f"https://cdn.example.com/m{i}.jpg", "jpg")
+        for i in range(25)
+    ]
+    _patch_parse(
+        instance,
+        monkeypatch,
+        parse=lambda url, proxy="", cookie="": asyncio.sleep(
+            0, result=FakeParseResult(media=refs)
+        ),
+    )
+    monkeypatch.setattr(
+        instance.client,
+        "download_parsed",
+        lambda result, path, proxy="", cookie="": asyncio.sleep(
+            0,
+            result=FakeDownloadResult(
+                files, media=[FakeMediaFile(p) for p in files]
+            ),
+        ),
+    )
+
+    bot = FakeBot()
+    result = await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert result.notice is not None, "截断提示要走 Result.notice"
+    assert "作品共 25 项" in result.notice
+    notice_texts = [text for text in bot.sent_texts if "作品共 25 项" in text]
+    assert len(notice_texts) == 1, "截断提示只发一次"
+
+    calls = bot.calls
+    notice_idx = next(
+        i
+        for i, (api, kw) in enumerate(calls)
+        if api == "send_msg"
+        and "作品共 25 项" in kw["message"].extract_plain_text()
+    )
+    media_idx = next(
+        i for i, (api, _) in enumerate(calls) if api == "send_group_forward_msg"
+    )
+    assert media_idx < notice_idx, "提示要晚于媒体"
+    emoji_idx = max(
+        i for i, (api, _) in enumerate(calls) if api == "set_msg_emoji_like"
+    )
+    assert notice_idx < emoji_idx, "提示要早于终态表情"

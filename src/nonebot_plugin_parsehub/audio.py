@@ -30,6 +30,18 @@ import httpx
 from nonebot import logger
 
 from . import keys
+from .bilibili import (
+    BV_PATTERN as _BV_RE,
+)
+from .bilibili import (
+    HOSTS as _BILI_HOSTS,
+)
+from .bilibili import (
+    SHORT_HOSTS as _BILI_SHORT_HOSTS,
+)
+from .bilibili import (
+    VIDEO_URL as _BILI_VIDEO_URL,
+)
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -41,14 +53,9 @@ _URL_RE = re.compile(
 )
 _TRAILING = "。，、；：！？)）】》\"'"
 
-# 裸 BV 号 / av 号：前后不能紧贴字母数字，免得切出更长的串。
-_BV_RE = re.compile(r"(?<![0-9A-Za-z])(BV[0-9A-Za-z]{10})(?![0-9A-Za-z])")
+# 裸 BV 号 / av 号：裸 BV 号见 :mod:`bilibili`（与 keys 共用同一份模式），
+# 前后不能紧贴字母数字，免得切出更长的串。
 _AV_RE = re.compile(r"(?<![0-9A-Za-z])[aA][vV]\d+")
-
-# B 站相关主机（含子域名）。
-_BILI_HOSTS = ("bilibili.com", "b23.tv", "bili2233.cn")
-_BILI_SHORT_HOSTS = ("b23.tv", "bili2233.cn")
-_BILI_VIDEO_URL = "https://www.bilibili.com/video/{}"
 
 # YouTube 相关主机。
 _YT_HOSTS = ("youtube.com", "youtu.be")
@@ -86,17 +93,6 @@ _YT_ERROR_CHARS = 200
 
 class AudioTooLarge(Exception):
     """音频体积超过上限（下载前预估或下载中途发现）。"""
-
-
-@dataclass(frozen=True)
-class AudioOptions:
-    """音频命令的当次选项。
-
-    Attributes:
-        as_file: True 表示以群文件 / 私聊文件发送，否则发 record 语音段。
-    """
-
-    as_file: bool = False
 
 
 @dataclass(frozen=True)
@@ -140,8 +136,8 @@ class YtAudio:
 # ---------------------------------------------------------------------------
 # 命令参数与目标提取（纯字符串处理，不发请求）
 # ---------------------------------------------------------------------------
-def parse_command(text: str) -> tuple[AudioOptions, str]:
-    """剥掉命令参数里的文件模式开关，返回选项与剩余文本。
+def parse_command(text: str) -> tuple[bool, str]:
+    """剥掉命令参数里的文件模式开关，返回是否以文件发送与剩余文本。
 
     开关只认第一个 token（``-f`` / ``--file``），写在后面的当普通文本。
 
@@ -149,15 +145,15 @@ def parse_command(text: str) -> tuple[AudioOptions, str]:
         text: 命令参数（去掉命令名后的全部文本）。
 
     Returns:
-        ``(选项, 剩余文本)``。
+        ``(是否文件模式, 剩余文本)``。
     """
     text = (text or "").strip()
     if not text:
-        return AudioOptions(), ""
+        return False, ""
     tokens = text.split(maxsplit=1)
     if tokens[0] in _FILE_FLAGS:
-        return AudioOptions(as_file=True), tokens[1] if len(tokens) > 1 else ""
-    return AudioOptions(), text
+        return True, tokens[1] if len(tokens) > 1 else ""
+    return False, text
 
 
 def _host_of(url: str) -> str:
@@ -568,7 +564,7 @@ def youtube_audio(url: str, proxy: str = "", cookie: str = "") -> YtAudio:
     )
 
 
-def youtube_download(
+def download_youtube(
     url: str,
     dest_dir: Path,
     proxy: str = "",

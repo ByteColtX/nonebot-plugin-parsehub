@@ -6,73 +6,13 @@
 全部离线：B 站接口与 yt-dlp 子进程都换成假实现，只验证插件自身的行为。
 """
 
-from __future__ import annotations
-
+import time
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from fake import make_group_event
-from nonebot.adapters.onebot.v11 import Bot, Message
-from nonebot.adapters.onebot.v11.exception import ActionFailed
-
-
-class FakeBot(Bot):
-    """记录所有 API 调用的假 Bot。"""
-
-    def __init__(self, *, fail_record: bool = False) -> None:
-        super().__init__(adapter=MagicMock(), self_id="10000")
-        self.calls: list[tuple[str, dict]] = []
-        self.fail_record = fail_record
-
-    async def call_api(self, api: str, **kwargs):  # type: ignore[override]
-        self.calls.append((api, kwargs))
-        if self.fail_record and api == "send_msg":
-            message = kwargs.get("message")
-            if isinstance(message, Message) and any(
-                seg.type == "record" for seg in message
-            ):
-                raise ActionFailed(
-                    status="failed",
-                    retcode=100,
-                    data=None,
-                    message="record not supported",
-                )
-        return {"status": "ok", "retcode": 0, "data": None}
-
-    @property
-    def sent_records(self) -> list[str]:
-        out = []
-        for api, kwargs in self.calls:
-            if api != "send_msg":
-                continue
-            message = kwargs.get("message")
-            if isinstance(message, Message):
-                out.extend(
-                    seg.data.get("file", "")
-                    for seg in message
-                    if seg.type == "record"
-                )
-        return out
-
-    @property
-    def sent_texts(self) -> list[str]:
-        out = []
-        for api, kwargs in self.calls:
-            if api != "send_msg":
-                continue
-            message = kwargs.get("message")
-            if isinstance(message, Message):
-                out.append(message.extract_plain_text())
-        return out
-
-    def uploaded_files(self) -> list[tuple[str, str]]:
-        return [
-            (kw.get("file", ""), kw.get("name", ""))
-            for api, kw in self.calls
-            if api == "upload_group_file"
-        ]
-
+from fakes import FakeBot
+from nonebot.adapters.onebot.v11 import Bot
 
 _BILI_URL = "https://www.bilibili.com/video/BV1A2xL67EMP"
 _BILI_CANONICAL = "https://www.bilibili.com/video/BV1A2xL67EMP"
@@ -145,7 +85,7 @@ def _patch_yt(monkeypatch, plugin, calls=None, **overrides) -> None:
         return out
 
     monkeypatch.setattr(plugin.audio, "youtube_audio", fake_fetch)
-    monkeypatch.setattr(plugin.audio, "youtube_download", fake_download)
+    monkeypatch.setattr(plugin.audio, "download_youtube", fake_download)
 
 
 # --------------------------------------------------------------------------- #
@@ -153,28 +93,28 @@ def _patch_yt(monkeypatch, plugin, calls=None, **overrides) -> None:
 # --------------------------------------------------------------------------- #
 def test_parse_command_strips_file_option(audio):
     """-f / --file 只影响当次，剩余文本原样返回。"""
-    opts, rest = audio.parse_command("BV1A2xL67EMP")
-    assert opts.as_file is False
+    as_file, rest = audio.parse_command("BV1A2xL67EMP")
+    assert as_file is False
     assert rest == "BV1A2xL67EMP"
 
-    opts, rest = audio.parse_command("-f BV1A2xL67EMP")
-    assert opts.as_file is True
+    as_file, rest = audio.parse_command("-f BV1A2xL67EMP")
+    assert as_file is True
     assert rest == "BV1A2xL67EMP"
 
-    opts, rest = audio.parse_command("--file BV1A2xL67EMP")
-    assert opts.as_file is True
+    as_file, rest = audio.parse_command("--file BV1A2xL67EMP")
+    assert as_file is True
     assert rest == "BV1A2xL67EMP"
 
     # 选项不在最前面就当普通文本
-    opts, rest = audio.parse_command("BV1A2xL67EMP -f")
-    assert opts.as_file is False
+    as_file, rest = audio.parse_command("BV1A2xL67EMP -f")
+    assert as_file is False
     assert rest == "BV1A2xL67EMP -f"
 
 
 def test_parse_command_only_option(audio):
     """只有选项没有目标：选项照常解析，剩余为空。"""
-    opts, rest = audio.parse_command("-f")
-    assert opts.as_file is True
+    as_file, rest = audio.parse_command("-f")
+    assert as_file is True
     assert rest == ""
 
 
@@ -489,6 +429,75 @@ async def test_handle_audio_second_call_hits_cache(
 
 
 @pytest.mark.asyncio
+async def test_bilibili_audio_under_budget(
+    plugin, monkeypatch, instance, service, update_settings
+):
+    """B 站音频取数也要吃总超时预算：预算耗尽按失败收尾，不无限等。"""
+    update_settings(timeout=1)
+
+    def slow_fetch(url, proxy=""):
+        time.sleep(2)  # 模拟卡死的接口调用（线程取消不掉，只能靠预算兜底）
+        return _bili_info()
+
+    def fake_download(audio_url, dest: Path, proxy="", max_bytes=0):
+        dest.write_bytes(b"\x00\x00\x00 ftypiso5" + b"a" * 1024)
+        return dest
+
+    monkeypatch.setattr(plugin.audio, "bilibili_audio", slow_fetch)
+    monkeypatch.setattr(plugin.audio, "download_bilibili", fake_download)
+
+    bot = FakeBot()
+    result = await service.handle_audio(
+        instance,
+        bot,
+        make_group_event(f"bm {_BILI_URL}"),
+        _BILI_URL,
+        "bilibili",
+    )
+
+    assert result.outcome is service.Outcome.PARSE_FAILED
+    emojis = [
+        kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
+    ]
+    assert emojis[-1] == plugin.feedback.Reaction.FAIL
+
+
+@pytest.mark.asyncio
+async def test_bilibili_audio_download_under_budget(
+    plugin, monkeypatch, instance, service, update_settings
+):
+    """B 站音频下载同样吃总超时预算：卡死的下载按失败收尾，不发半截文件。"""
+    update_settings(timeout=1)
+
+    def fake_fetch(url, proxy=""):
+        return _bili_info()
+
+    def slow_download(audio_url, dest: Path, proxy="", max_bytes=0):
+        time.sleep(2)  # 模拟卡死的 CDN 流（线程取消不掉，只能靠预算兜底）
+        dest.write_bytes(b"\x00\x00\x00 ftypiso5" + b"a" * 1024)
+        return dest
+
+    monkeypatch.setattr(plugin.audio, "bilibili_audio", fake_fetch)
+    monkeypatch.setattr(plugin.audio, "download_bilibili", slow_download)
+
+    bot = FakeBot()
+    result = await service.handle_audio(
+        instance,
+        bot,
+        make_group_event(f"bm {_BILI_URL}"),
+        _BILI_URL,
+        "bilibili",
+    )
+
+    assert result.outcome is service.Outcome.DOWNLOAD_FAILED
+    assert not bot.sent_records
+    emojis = [
+        kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
+    ]
+    assert emojis[-1] == plugin.feedback.Reaction.FAIL
+
+
+@pytest.mark.asyncio
 async def test_handle_audio_fetch_failure_notice(
     plugin, monkeypatch, instance, service
 ):
@@ -551,7 +560,7 @@ async def test_handle_audio_too_large_during_download(
         raise plugin.audio.AudioTooLarge()
 
     _patch_yt(monkeypatch, plugin)
-    monkeypatch.setattr(plugin.audio, "youtube_download", fake_download)
+    monkeypatch.setattr(plugin.audio, "download_youtube", fake_download)
 
     bot = FakeBot()
     result = await service.handle_audio(
