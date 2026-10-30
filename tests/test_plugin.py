@@ -401,6 +401,30 @@ def test_content_key_zuiyou_and_xiaoheihe_share_ids(plugin, keys):
     ) == keys.content_key(xhh_a)
 
 
+def test_content_key_douban_topics(plugin, keys):
+    """豆瓣 app 跳转链接要按 topic id 区分，不能都落到 dispatch 路径。"""
+    first = (
+        "https://www.douban.com/doubanapp/dispatch"
+        "?uri=%2Ftopic%2F503848885%3F_spm_id%3DMzgwNzg5OTQ"
+        "&_i=93340208406402e&dt_dapp=1"
+    )
+    second = (
+        "https://www.douban.com/doubanapp/dispatch"
+        "?uri=%2Ftopic%2F503145092%3F_spm_id%3DMTgxODg1MjY4"
+        "&_i=93340218406402e&dt_dapp=1"
+    )
+    assert keys.content_key(first) == "douban:503848885"
+    assert keys.content_key(second) == "douban:503145092"
+    assert keys.content_key(first) != keys.content_key(second)
+    assert keys.content_key(
+        "https://www.douban.com/group/topic/503848885/"
+    ) == keys.content_key(first)
+    assert keys.content_key(
+        "https://m.douban.com/doubanapp/dispatch"
+        "?uri=%2Fgroup%2Ftopic%2F503848885"
+    ) == keys.content_key(first)
+
+
 def test_content_key_falls_back_to_host_and_path(plugin, keys):
     """认不出 ID 的链接退化成「主机 + 路径」，丢掉查询串。"""
     key = keys.content_key("https://b23.tv/3XdwepO")
