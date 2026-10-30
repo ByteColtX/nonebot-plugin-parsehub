@@ -139,7 +139,6 @@ def test_extract_urls_rejects_broad_homepages(plugin, keys):
 def test_extract_urls_ignores_removed_hosts(plugin, keys):
     """上游不支持 / 只在特定子域支持的域名不再进白名单。"""
     text = (
-        "https://iesdouyin.com/share/video/123 "
         "https://fb.watch/abc "
         "https://ixigua.com/abc "
         "https://threads.net/abc "
@@ -148,6 +147,12 @@ def test_extract_urls_ignores_removed_hosts(plugin, keys):
         "https://xiaochuankeji.cn/abc"
     )
     assert keys.extract_urls(text) == []
+
+
+def test_extract_urls_accepts_iesdouyin(plugin, keys):
+    """iesdouyin 仍是上游支持的抖音分享域名。"""
+    url = "https://www.iesdouyin.com/share/video/7695216850086505892"
+    assert keys.extract_urls(url) == [url]
 
 
 def test_extract_urls_accepts_new_supported_shapes(plugin, keys):
@@ -365,6 +370,19 @@ def test_content_key_falls_back_to_host_and_path(plugin, keys):
     assert key == "b23.tv/3xdwepo"
     assert keys.content_key("https://b23.tv/3XdwepO?share=1") == key
     assert keys.content_key("https://b23.tv/3XdwepO?p=2") == "b23.tv/3xdwepo:p2"
+
+
+def test_content_key_fold_case_covers_fallback(plugin, keys):
+    """fold_case 也要覆盖没有 ID pattern 的 fallback 路径。"""
+    lower = "https://www.youtube.com/shorts/aqz-KE-bpKQ"
+    upper = "https://www.youtube.com/shorts/AQZ-KE-BPKQ"
+    assert keys.content_key(lower) == keys.content_key(upper)
+    assert keys.content_key(lower, fold_case=False) != keys.content_key(
+        upper, fold_case=False
+    )
+    assert keys.content_key(
+        "https://b23.tv/AbCdEf", fold_case=False
+    ) != keys.content_key("https://b23.tv/abcDEF", fold_case=False)
 
 
 def test_dedupe_is_per_session(plugin, instance):

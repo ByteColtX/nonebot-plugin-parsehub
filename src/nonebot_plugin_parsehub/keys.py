@@ -43,6 +43,7 @@ ALLOWED_HOSTS: tuple[str, ...] = (
     "facebook.com",
     "fixupx.com",
     "h5.pipix.com",
+    "iesdouyin.com",
     "instagram.com",
     "kuaishou.com",
     "medium.com",
@@ -422,7 +423,9 @@ def content_key(url: str, *, fold_case: bool = True) -> str:
         if host.startswith(prefix):
             host = host[len(prefix) :]
             break
-    key = f"{host}{parsed.path.rstrip('/')}".lower()
+    key = f"{host}{parsed.path.rstrip('/')}"
+    if fold_case:
+        key = key.lower()
     if _is_bilibili_short_host(host):
         part = _bilibili_part(url)
         if part > 1:
