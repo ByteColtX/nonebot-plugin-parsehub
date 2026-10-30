@@ -58,7 +58,7 @@ def _patch_bili(monkeypatch, plugin, calls=None, **overrides) -> None:
             calls["fetch"] = calls.get("fetch", 0) + 1
         return info
 
-    def fake_download(audio_url, dest: Path, proxy="", max_bytes=0):
+    def fake_download(audio_url, dest: Path, proxy="", max_bytes=0, timeout=0):
         if calls is not None:
             calls["download"] = calls.get("download", 0) + 1
         dest.write_bytes(b"\x00\x00\x00 ftypiso5" + b"a" * 1024)
@@ -546,7 +546,7 @@ async def test_bilibili_audio_under_budget(
         time.sleep(2)  # 模拟卡死的接口调用（线程取消不掉，只能靠预算兜底）
         return _bili_info()
 
-    def fake_download(audio_url, dest: Path, proxy="", max_bytes=0):
+    def fake_download(audio_url, dest: Path, proxy="", max_bytes=0, timeout=0):
         dest.write_bytes(b"\x00\x00\x00 ftypiso5" + b"a" * 1024)
         return dest
 
@@ -579,7 +579,10 @@ async def test_bilibili_audio_download_under_budget(
     def fake_fetch(url, proxy=""):
         return _bili_info()
 
-    def slow_download(audio_url, dest: Path, proxy="", max_bytes=0):
+    seen: list[float] = []
+
+    def slow_download(audio_url, dest: Path, proxy="", max_bytes=0, timeout=0):
+        seen.append(timeout)
         time.sleep(2)  # 模拟卡死的 CDN 流（线程取消不掉，只能靠预算兜底）
         dest.write_bytes(b"\x00\x00\x00 ftypiso5" + b"a" * 1024)
         return dest
@@ -598,10 +601,51 @@ async def test_bilibili_audio_download_under_budget(
 
     assert result.outcome is service.Outcome.DOWNLOAD_FAILED
     assert not bot.sent_records
+    assert seen and 0 < seen[0] <= 1
     emojis = [
         kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
     ]
     assert emojis[-1] == plugin.feedback.Reaction.FAIL
+
+
+def test_download_bilibili_stops_at_deadline(audio, monkeypatch, tmp_path):
+    """B 站流式下载在总超时到点时中断，不再继续写文件。"""
+
+    class Response:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def iter_bytes(self, size):
+            yield b"a" * 16
+            yield b"b" * 16
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def stream(self, method, url):
+            return Response()
+
+    monkeypatch.setattr(audio.httpx, "Client", Client)
+    ticks = iter([0.0, 0.0, 1.0])
+    monkeypatch.setattr(audio.time, "monotonic", lambda: next(ticks))
+
+    dest = tmp_path / "a.m4a"
+    with pytest.raises(RuntimeError, match="超时"):
+        audio.download_bilibili("https://example.com/a", dest, timeout=0.5)
+
+    assert dest.read_bytes() == b"a" * 16
 
 
 @pytest.mark.asyncio
@@ -690,7 +734,7 @@ async def test_handle_audio_download_failure(
 ):
     """下载炸了：失败表情 + 提示，不发半成品。"""
 
-    def fake_download(audio_url, dest: Path, proxy="", max_bytes=0):
+    def fake_download(audio_url, dest: Path, proxy="", max_bytes=0, timeout=0):
         raise RuntimeError("CDN 403")
 
     _patch_bili(monkeypatch, plugin)
