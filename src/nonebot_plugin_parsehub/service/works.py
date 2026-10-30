@@ -418,8 +418,10 @@ async def _download_and_deliver(
     result = Result.delivered(report, work.all_keys)
     if work.total > MAX_MEDIA_ITEMS:
         # 截断提示走 notice，由统一的收尾逻辑发：媒体 → 提示 → 终态表情，
-        # 不会抢在媒体前面。
-        result.notice = feedback.truncated_notice(work.total, MAX_MEDIA_ITEMS)
+        # 不会抢在媒体前面。sent 用实际发出数，部分失败时也如实反映。
+        result.notice = feedback.truncated_notice(
+            work.total, len(report.sent), MAX_MEDIA_ITEMS
+        )
 
     # 只缓存真正发出去的媒体：被体积上限挡掉的不该占缓存配额；部分失败的
     # 也不能写——下次命中会缺文件。

@@ -61,10 +61,26 @@ AUDIO_EXTENSIONS = frozenset(
     }
 )
 
-# 一次最多发多少个媒体。图集动辄上百张，而每张都要等协议端上传到 QQ（实测约
-# 2s/张且串行），下载也慢：全发既会顶穿总超时，也会把合并转发拖到超时后逐条
-# 刷屏。超出部分直接不发，只发前 MAX_MEDIA_ITEMS 个。
-MAX_MEDIA_ITEMS = 20
+# 单个作品最多处理多少个媒体。图集动辄上百张，每张都要等协议端上传（实测约
+# 2s/张且串行）；超过 MAX_MEDIA_ITEMS 的部分不下载也不再发。发送时还要按
+# 单次合并转发的容量分批，见 :func:`chunk_size`。
+MAX_MEDIA_ITEMS = 100
+
+# 单张媒体的上传估算：实测约 2s，留一半余量给引用构造与协议端排队。
+_UPLOAD_SECONDS = 3.0
+
+
+def chunk_size(forward_timeout: float) -> int:
+    """一次合并转发最多放多少个媒体。
+
+    Args:
+        forward_timeout: 单次合并转发的超时秒数。
+
+    Returns:
+        至少 1，至多 :data:`MAX_MEDIA_ITEMS`。
+    """
+    return max(1, min(MAX_MEDIA_ITEMS, int(forward_timeout / _UPLOAD_SECONDS)))
+
 
 # 探测文件体积的超时（秒）。
 PROBE_TIMEOUT_SECONDS = 15.0
