@@ -1300,6 +1300,20 @@ def test_public_url_mapping(plugin, tmp_media, instance):
     )
 
 
+def test_public_url_mapping_encodes_special_names(plugin, tmp_media, instance):
+    """标题里的空格 / # / 中文必须做百分号编码，否则协议端取不到。"""
+    from urllib.parse import quote
+
+    sub = tmp_media / "deadbeef"
+    sub.mkdir()
+    f = sub / "2024 歌单#1.m4a"
+    f.write_bytes(b"1")
+    expected = "http://192.168.1.5:8899/" + quote(
+        "deadbeef/2024 歌单#1.m4a", safe="/"
+    )
+    assert instance.relay.url_for(f, "192.168.1.5", 8899) == expected
+
+
 def test_cleanup_removes_old_dirs(plugin, tmp_media, instance):
     old = tmp_media / "old"
     old.mkdir()
