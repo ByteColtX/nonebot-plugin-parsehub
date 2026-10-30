@@ -276,13 +276,16 @@ def file_stem(title: str, fallback: str, part: int = 1) -> str:
 def cache_key(url: str) -> str:
     """音频专用的作品 key：视频 key 加 ``audio:`` 前缀。
 
+    YouTube / B 站的作品 ID 区分大小写，这里保留原始大小写，避免两个
+    只差大小写的 ID 撞进同一份音频缓存。
+
     Args:
         url: 目标链接。
 
     Returns:
         归一化后的 key，与视频缓存互不干扰。
     """
-    return f"audio:{keys.content_key(url)}"
+    return f"audio:{keys.content_key(url, fold_case=False)}"
 
 
 # ---------------------------------------------------------------------------

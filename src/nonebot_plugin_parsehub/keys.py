@@ -387,7 +387,7 @@ def host_allowed(host: str) -> bool:
     )
 
 
-def content_key(url: str) -> str:
+def content_key(url: str, *, fold_case: bool = True) -> str:
     """把链接归一化成去重/缓存用的 key（纯字符串处理，不发请求）。
 
     认得出作品 ID 的平台直接用 ``平台:id``，这样同一个作品的两种写法能对上——比如
@@ -399,6 +399,8 @@ def content_key(url: str) -> str:
 
     Args:
         url: 链接，可以是用户发的原始链接，也可以是 ParseHub 给的 ``raw_url``。
+        fold_case: 是否把作品 ID 统一成小写；音频缓存传 ``False``，保留
+            YouTube / B 站 ID 的大小写。
 
     Returns:
         归一化后的 key。
@@ -406,7 +408,8 @@ def content_key(url: str) -> str:
     for name, pattern in _ID_PATTERNS:
         match = pattern.search(url)
         if match:
-            key = f"{name}:{match.group(1).lower()}"
+            ident = match.group(1)
+            key = f"{name}:{ident.lower() if fold_case else ident}"
             if name == "bilibili":
                 part = _bilibili_part(url)
                 if part > 1:
