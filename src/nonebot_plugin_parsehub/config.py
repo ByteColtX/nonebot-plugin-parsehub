@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from nonebot import get_plugin_config
+from nonebot import get_driver, get_plugin_config
 from pydantic import BaseModel, Field
 
 from .platforms import OVERSEAS_PLATFORMS, normalise_platform
@@ -233,3 +233,12 @@ class Settings:
 
 
 plugin_config = get_plugin_config(Config)
+
+
+def forward_node_name() -> str:
+    """合并转发节点上显示的名字。
+
+    Returns:
+        已配置昵称里的任意一个；完全没配昵称时退回 ``"ParseHub"``。
+    """
+    return next(iter(get_driver().config.nickname), "ParseHub")

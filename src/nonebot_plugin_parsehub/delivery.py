@@ -23,16 +23,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import os
 import shutil
 import time
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
-from nonebot import get_driver, logger
+from nonebot import logger
 from nonebot.adapters.onebot.v11 import (
     GroupMessageEvent,
     Message,
@@ -41,7 +39,7 @@ from nonebot.adapters.onebot.v11 import (
 )
 from nonebot.adapters.onebot.v11.exception import ActionFailed
 
-from .config import Settings
+from .config import Settings, forward_node_name
 from .media import MAX_MEDIA_ITEMS, MediaFile, MediaKind
 from .relay import MediaRelay
 
@@ -106,64 +104,7 @@ class MediaReport:
         return bool(self.sent) and not self.failed
 
 
-# 合并转发里显示的节点名取自 NICKNAME 的第一项。
-# nonebot 把 NICKNAME 解析成 set，顺序会丢，所以这里读原始配置值，保证显示稳定
-# （否则每次重启昵称都可能变），读不到才退回配置集合里的第一个。
-def _configured_nicknames() -> list[str]:
-    """按 .env 里的书写顺序读出机器人昵称。
-
-    Returns:
-        昵称列表；读不到时为 ``[]``。
-    """
-    raw = os.environ.get("NICKNAME", "").strip()
-    candidates = [raw] if raw else []
-    if not candidates:
-        env_files = get_driver().config.model_config.get("env_file") or ()
-        if isinstance(env_files, str):
-            env_files = (env_files,)
-        for name in env_files:
-            try:
-                text = Path(str(name)).read_text(encoding="utf-8")
-            except OSError:
-                continue
-            for line in text.splitlines():
-                key, sep, value = line.partition("=")
-                if sep and key.strip() == "NICKNAME":
-                    candidates.append(value.strip())
-                    break
-            if candidates:
-                break
-
-    for value in candidates:
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:  # 不是 JSON：按逗号切，去掉注释和引号
-            plain = value.split("#", 1)[0].strip()
-            parsed = [item.strip().strip("\"'") for item in plain.split(",")]
-        if isinstance(parsed, str):
-            parsed = [parsed]
-        if not isinstance(parsed, list):
-            continue
-        names = [
-            item.strip()
-            for item in parsed
-            if isinstance(item, str) and item.strip()
-        ]
-        if names:
-            return names
-
-    return sorted(get_driver().config.nickname)
-
-
-@lru_cache(maxsize=1)
-def forward_node_name() -> str:
-    """合并转发节点上显示的名字。
-
-    Returns:
-        ``NICKNAME`` 的第一项；完全没配昵称时退回 ``"ParseHub"``。
-    """
-    names = _configured_nicknames()
-    return names[0] if names else "ParseHub"
+# 合并转发里显示的节点名在配置层取（见 :func:`config.forward_node_name`）。
 
 
 def _to_base64(path: Path) -> str:
@@ -176,6 +117,26 @@ def _to_base64(path: Path) -> str:
         形如 ``base64://<b64>`` 的字符串。
     """
     return "base64://" + base64.b64encode(path.read_bytes()).decode("ascii")
+
+
+def _segment(file: MediaFile, ref: str) -> MessageSegment | None:
+    """把媒体映射成对应的消息段。
+
+    Args:
+        file: 待发送的媒体。
+        ref: 协议端能取到的引用。
+
+    Returns:
+        图片 / 视频 / 语音的消息段；文件类没有对应段，返回 ``None``，由调用方
+        改走文件上传。
+    """
+    if file.kind is MediaKind.IMAGE:
+        return MessageSegment.image(file=ref)
+    if file.kind is MediaKind.VIDEO:
+        return MessageSegment.video(file=ref)
+    if file.kind is MediaKind.RECORD:
+        return MessageSegment.record(file=ref)
+    return None
 
 
 class Delivery:
@@ -258,7 +219,9 @@ class Delivery:
             try:
                 shutil.copy2(resolved, target)
             except OSError as exc:
+                # 返回不存在的 target 只会发出必败的投递，宁可报错让调用方记失败
                 logger.warning(f"[parsehub] 媒体复制失败 {resolved}: {exc}")
+                raise
         return target
 
     # ---- 发送 ----
@@ -349,12 +312,35 @@ class Delivery:
         # 兜底：缓存命中的路径不经过上层截断，这里再保证一次
         items = items[:MAX_MEDIA_ITEMS]
 
-        if len(items) > 1 and await self.send_forward(sender, event, items):
+        # 引用只算一次：合并转发与逐条兜底共用同一份，base64 模式不会整文件
+        # 重读，file / http 模式不会重复建任务目录。拿不到引用（硬链接和
+        # 复制都失败）的文件直接记失败，不发必败的投递。
+        refs: list[str] = []
+        ready: list[MediaFile] = []
+        for file in items:
+            try:
+                refs.append(await self.ref(file.path))
+                ready.append(file)
+            except Exception as exc:  # 引用拿不到，发出去也必然失败
+                logger.warning(
+                    f"[parsehub] 媒体引用获取失败 {file.path}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                report.failed.append(file)
+                if self.settings.fail_notice:
+                    await self.send_text(sender, event, self._fail_text(file))
+        items, refs = ready, refs
+        if not items:
+            return report
+
+        if len(items) > 1 and await self.send_forward(
+            sender, event, items, refs
+        ):
             report.sent.extend(items)
             return report
 
-        for file in items:
-            if await self._send_one(sender, event, file):
+        for file, ref in zip(items, refs, strict=True):
+            if await self._send_one(sender, event, file, ref):
                 report.sent.append(file)
             else:
                 report.failed.append(file)
@@ -397,6 +383,7 @@ class Delivery:
         sender: Sender,
         event: MessageEvent,
         file: MediaFile,
+        ref: str,
     ) -> bool:
         """逐条发送一个媒体。
 
@@ -404,20 +391,20 @@ class Delivery:
             sender: 协议端接口。
             event: 触发消息事件。
             file: 待发送的媒体。
+            ref: 预先算好的引用（与合并转发共用，不重复计算）。
 
         Returns:
             成功为 True。
         """
         try:
-            ref = await self.ref(file.path)
-            if file.kind is MediaKind.IMAGE:
-                await sender.send(event, MessageSegment.image(file=ref))
-            elif file.kind is MediaKind.VIDEO:
-                await sender.send(event, MessageSegment.video(file=ref))
-            elif file.kind is MediaKind.RECORD:
-                await sender.send(event, MessageSegment.record(file=ref))
-            elif not await self._send_file(sender, event, ref, file.path.name):
-                return False
+            segment = _segment(file, ref)
+            if segment is None:  # 文件类没有对应消息段，走上传
+                if not await self._send_file(
+                    sender, event, ref, file.path.name
+                ):
+                    return False
+            else:
+                await sender.send(event, segment)
         except ActionFailed as exc:
             logger.warning(f"[parsehub] 媒体被协议端拒绝: {exc}")
             return False
@@ -471,6 +458,7 @@ class Delivery:
         sender: Sender,
         event: MessageEvent,
         files: list[MediaFile],
+        refs: list[str],
     ) -> bool:
         """把多个媒体合并成一条转发消息。
 
@@ -478,33 +466,33 @@ class Delivery:
             sender: 协议端接口。
             event: 触发消息事件。
             files: 待发送的本地媒体。
+            refs: 与 ``files`` 一一对应的引用（调用方只算一次）。
 
         Returns:
             合并转发成功返回 True；媒体类型不适合转发时返回 False，由调用方改走
             逐条发送。
         """
-        # 昵称要从 .env 里读，是同步磁盘 IO：只算一次，放线程里，别卡事件循环
-        name = await asyncio.to_thread(forward_node_name)
-        nodes: list[dict] = []
-        for file in files:
-            if file.kind in (MediaKind.FILE, MediaKind.RECORD):
-                return False
-            ref = await self.ref(file.path)
-            nodes.append(
-                {
-                    "type": "node",
-                    "data": {
-                        "uin": str(sender.self_id),
-                        "name": name,
-                        "content": [
-                            {
-                                "type": str(file.kind),
-                                "data": {"file": ref},
-                            }
-                        ],
-                    },
-                }
-            )
+        unsuitable = (MediaKind.FILE, MediaKind.RECORD)
+        if any(file.kind in unsuitable for file in files):
+            return False
+        # 昵称直接取配置（没配就用 "ParseHub"），节点构造是纯内存活
+        name = forward_node_name()
+        nodes = [
+            {
+                "type": "node",
+                "data": {
+                    "uin": str(sender.self_id),
+                    "name": name,
+                    "content": [
+                        {
+                            "type": str(file.kind),
+                            "data": {"file": ref},
+                        }
+                    ],
+                },
+            }
+            for file, ref in zip(files, refs, strict=True)
+        ]
 
         timeout = max(1, self.settings.forward_timeout)
         started = time.monotonic()
