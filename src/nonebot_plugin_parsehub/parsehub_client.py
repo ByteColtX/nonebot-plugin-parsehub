@@ -14,12 +14,15 @@ numpy / opencv（数秒），因此实例是懒加载的，并由 ``App`` 在启
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import shutil
 import tomllib
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
+import httpx
 from nonebot import logger
 
 # 多文件并发下载数（parsehub 2.3.10 起支持）。下载以网络等待为主，并发比串行快
@@ -47,6 +50,124 @@ def _normalise_animated_ext(result: Any) -> None:
         suffix = suffix.lower().lstrip(".")
         if suffix in _ANIMATED_VIDEO_SUFFIXES:
             item.ext = suffix
+
+
+# 皮皮虾的 RENDER_DATA 里 note.multi_image 才是完整图集；ParseHub 2.3.15
+# 只读了 cover.download_list，导致多图帖只解析出第一张。
+_PIPIX_RENDER = re.compile(
+    r'<script[^>]*\bid=["\']RENDER_DATA["\'][^>]*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _pipix_images(html: str) -> list[tuple[str, int, int]]:
+    """从皮皮虾详情页里取完整图集。
+
+    Args:
+        html: 详情页 HTML。
+
+    Returns:
+        ``(url, width, height)`` 列表；解析失败时为空列表。
+    """
+    match = _PIPIX_RENDER.search(html)
+    if match is None:
+        return []
+    try:
+        data = json.loads(unquote(match.group(1)))
+    except (TypeError, ValueError):
+        return []
+    item = (data.get("ppxItemDetail") or {}).get("item") or {}
+    note = item.get("note") or {}
+    images: list[tuple[str, int, int]] = []
+    for image in note.get("multi_image") or []:
+        if not isinstance(image, dict):
+            continue
+        candidates = image.get("url_list") or image.get("download_list") or []
+        url = next(
+            (
+                str(candidate.get("url"))
+                for candidate in candidates
+                if isinstance(candidate, dict) and candidate.get("url")
+            ),
+            "",
+        )
+        if not url:
+            continue
+        images.append(
+            (
+                url,
+                int(image.get("width") or 0),
+                int(image.get("height") or 0),
+            )
+        )
+    return images
+
+
+def _fetch_pipix_images(
+    url: str, proxy: str = ""
+) -> list[tuple[str, int, int]]:
+    """同步抓取皮皮虾详情页并解析完整图集。
+
+    Args:
+        url: 详情页链接。
+        proxy: 代理。
+
+    Returns:
+        ``(url, width, height)`` 列表。
+    """
+    with httpx.Client(
+        timeout=30,
+        follow_redirects=True,
+        proxy=proxy or None,
+        headers={"User-Agent": "Mozilla/5.0"},
+    ) as client:
+        response = client.get(url)
+        response.raise_for_status()
+        return _pipix_images(response.text)
+
+
+async def _enrich_pipix(
+    result: Any,
+    url: str,
+    proxy: str,
+) -> None:
+    """把皮皮虾多图帖补成完整图集。
+
+    ParseHub 只从 ``cover.download_list`` 取一张；``note.multi_image`` 里才
+    有全部图片。拿不到时保留原结果，不影响主流程。
+
+    Args:
+        result: ParseHub 解析结果。
+        url: 原始链接。
+        proxy: 解析代理。
+    """
+    if getattr(getattr(result, "platform", None), "id", "") != "pipix":
+        return
+    media = getattr(result, "media", None)
+    current = list(media) if isinstance(media, (list, tuple)) else [media]
+    current = [item for item in current if item]
+    from parsehub.types import ImageRef
+
+    if len(current) != 1 or not isinstance(current[0], ImageRef):
+        return
+
+    target = str(getattr(result, "raw_url", "") or url)
+    try:
+        images = await asyncio.to_thread(_fetch_pipix_images, target, proxy)
+    except Exception as exc:  # 补图失败就退回 ParseHub 的原结果
+        logger.warning(
+            f"[parsehub] 皮皮虾图集补全失败 {target}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return
+    if len(images) <= len(current):
+        return
+
+    result.media = [
+        ImageRef(url=image_url, ext="jpg", width=width, height=height)
+        for image_url, width, height in images
+    ]
+    logger.info(f"[parsehub] 皮皮虾图集补全为 {len(images)} 张")
 
 
 def platform_cookie(platform: str, fallback: str) -> str:
@@ -180,6 +301,7 @@ class ParseHubClient:
             cookie=cookie or None,
         )
         _normalise_animated_ext(result)
+        await _enrich_pipix(result, url, proxy)
         return result
 
     async def download(
