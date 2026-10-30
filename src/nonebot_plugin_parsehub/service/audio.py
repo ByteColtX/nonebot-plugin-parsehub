@@ -101,7 +101,12 @@ async def _fetch_youtube(
     """yt-dlp 取 YouTube 音频元信息（吃操作预算）。"""
     async with budget.timeout():
         return await asyncio.to_thread(
-            audio.youtube_audio, target, proxy, cookie, cookie_dir
+            audio.youtube_audio,
+            target,
+            proxy,
+            cookie,
+            cookie_dir,
+            max(0.1, budget.remaining),
         )
 
 
@@ -121,7 +126,7 @@ async def _download_youtube(
             info.webpage_url,
             task_dir,
             proxy,
-            max(0.0, budget.remaining),
+            max(0.1, budget.remaining),
             max_bytes,
             cookie,
             cookie_dir,

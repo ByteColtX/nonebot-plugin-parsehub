@@ -72,7 +72,7 @@ def _patch_yt(monkeypatch, plugin, calls=None, **overrides) -> None:
     """把 yt-dlp 元信息与下载换成假实现。"""
     info = _yt_info(**overrides)
 
-    def fake_fetch(url, proxy="", cookie="", cookie_dir=None):
+    def fake_fetch(url, proxy="", cookie="", cookie_dir=None, timeout=None):
         if calls is not None:
             calls["fetch"] = calls.get("fetch", 0) + 1
         return info
@@ -276,6 +276,32 @@ def test_youtube_audio_cookie_requires_dir(plugin):
     """带 cookie 时必须给 cookie_dir，不能悄悄落回系统临时目录。"""
     with pytest.raises(ValueError, match="cookie_dir"):
         plugin.audio.youtube_audio("https://youtu.be/x", cookie="SID=secret")
+
+
+def test_youtube_audio_passes_bounded_timeout(plugin, monkeypatch):
+    """元信息子进程超时受调用方预算约束，0 也至少给 0.1 秒。"""
+    seen: list[float] = []
+
+    def fake_run(args, **kwargs):
+        seen.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps(
+                {
+                    "id": "x",
+                    "title": "t",
+                    "duration": 1,
+                    "webpage_url": "https://youtu.be/x",
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(plugin.audio.subprocess, "run", fake_run)
+    plugin.audio.youtube_audio("https://youtu.be/x", timeout=12)
+    plugin.audio.youtube_audio("https://youtu.be/x", timeout=0)
+    assert seen == [12, 0.1]
 
 
 # --------------------------------------------------------------------------- #
@@ -740,7 +766,7 @@ async def test_handle_audio_live_youtube_rejected(
 ):
     """直播 / 预告不给提取音频，提示原因。"""
 
-    def fake_fetch(url, proxy="", cookie="", cookie_dir=None):
+    def fake_fetch(url, proxy="", cookie="", cookie_dir=None, timeout=None):
         raise RuntimeError("不支持直播")
 
     monkeypatch.setattr(plugin.audio, "youtube_audio", fake_fetch)
@@ -782,7 +808,7 @@ async def test_handle_audio_cookie_dir_under_cache(
     """YouTube 取数与下载都用插件的 cache/tmp。"""
     seen: list[Path | None] = []
 
-    def fake_fetch(url, proxy="", cookie="", cookie_dir=None):
+    def fake_fetch(url, proxy="", cookie="", cookie_dir=None, timeout=None):
         seen.append(cookie_dir)
         return _yt_info()
 
@@ -809,6 +835,43 @@ async def test_handle_audio_cookie_dir_under_cache(
     )
     expected = instance.cache.root.parent / "tmp"
     assert seen == [expected, expected]
+
+
+@pytest.mark.asyncio
+async def test_handle_audio_youtube_uses_remaining_budget(
+    plugin, monkeypatch, instance, service, update_settings
+):
+    """YouTube 元信息与下载都把剩余预算传给子进程。"""
+    update_settings(timeout=10)
+    seen: list[float] = []
+
+    def fake_fetch(url, proxy="", cookie="", cookie_dir=None, timeout=None):
+        seen.append(timeout)
+        return _yt_info()
+
+    def fake_download(
+        url,
+        dest_dir: Path,
+        proxy="",
+        timeout=0,
+        max_bytes=0,
+        cookie="",
+        cookie_dir=None,
+    ):
+        seen.append(timeout)
+        out = dest_dir / "ylLOn6KXzAc.m4a"
+        out.write_bytes(b"\x00\x00\x00 ftypiso5" + b"a" * 1024)
+        return out
+
+    monkeypatch.setattr(plugin.audio, "youtube_audio", fake_fetch)
+    monkeypatch.setattr(plugin.audio, "download_youtube", fake_download)
+
+    bot = FakeBot()
+    await service.handle_audio(
+        instance, bot, make_group_event(f"ym {_YT_URL}"), _YT_URL, "youtube"
+    )
+    assert len(seen) == 2
+    assert all(0 < value <= 10 for value in seen)
 
 
 @pytest.mark.asyncio
