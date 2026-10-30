@@ -261,19 +261,6 @@ class ParseHubClient:
         hub = await self.hub()
         return await asyncio.to_thread(lambda: hub.get_parser(url) is not None)
 
-    async def platform_id(self, url: str) -> str | None:
-        """返回链接所属的平台 id。
-
-        Args:
-            url: 待检查的链接。
-
-        Returns:
-            平台 id，例如 ``bilibili``；无对应平台时返回 None。
-        """
-        hub = await self.hub()
-        platform = await asyncio.to_thread(hub.get_platform, url)
-        return platform.id if platform else None
-
     async def parse(
         self,
         url: str,

@@ -24,6 +24,39 @@ SHORT_LINK_HOSTS = (
     "weixin.qq.com",
 )
 
+# 每个平台取一条上游解析器认得的链接，用来核对本地 host→platform 表。
+PLATFORM_SAMPLES = (
+    "https://www.bilibili.com/video/BV1xx411c7mD",
+    "https://b23.tv/abcd",
+    "https://v.douyin.com/abc/",
+    "https://www.iesdouyin.com/share/video/1",
+    "https://www.douban.com/topic/123",
+    "https://douc.cc/abc",
+    "https://xhslink.com/a/abc",
+    "https://www.coolapk.com/feed/1",
+    "https://www.zhihu.com/question/1",
+    "https://weibo.com/123/abc",
+    "https://h5.pipix.com/s/abc",
+    "https://s.izuiyou.com/s/abc",
+    "https://share.xiaochuankeji.cn/hybrid/share/post?pid=1",
+    "https://www.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=1",
+    "https://twitter.com/a/status/1",
+    "https://fixupx.com/a/status/1",
+    "https://x.com/a/status/1",
+    "https://www.youtube.com/watch?v=abc",
+    "https://youtu.be/abcdefghijk",
+    "https://www.instagram.com/p/abc/",
+    "https://www.tiktok.com/@a/video/1",
+    "https://www.threads.com/@a/post/1",
+    "https://www.facebook.com/watch?v=1",
+    "https://mp.weixin.qq.com/s/abc",
+    "https://weixin.qq.com/sph/abc",
+    "https://channels.weixin.qq.com/finder-preview/pages/sph?id=abc",
+    "https://www.tieba.baidu.com/p/123",
+    "https://www.toutiao.com/article/123",
+    "https://www.kuaishou.com/short-video/1",
+)
+
 
 def upstream_platform_ids() -> set[str]:
     """枚举 ParseHub 里所有解析器的 platform.id。"""
@@ -47,6 +80,14 @@ def upstream_platform_ids() -> set[str]:
     return found
 
 
+@pytest.fixture(scope="session")
+def upstream_hub():
+    """本地 ParseHub 实例：parser 选择只做正则，不发请求。"""
+    from parsehub import ParseHub
+
+    return ParseHub()
+
+
 def test_every_supported_platform_has_card_entry(platforms) -> None:
     """白名单里的每个平台都要能在卡片里查到，否则图标会退回默认的 X。"""
     missing = sorted(platforms.SUPPORTED_PLATFORMS - platforms.PLATFORMS.keys())
@@ -60,6 +101,22 @@ def test_supported_platforms_exist_upstream(platforms) -> None:
     assert "bilibili" in found, f"上游平台枚举不完整：{sorted(found)}"
     missing = sorted(platforms.SUPPORTED_PLATFORMS - found)
     assert not missing, f"白名单里这些 id 上游已没有：{missing}"
+
+
+def test_host_platforms_are_supported(keys, platforms) -> None:
+    """``HOST_PLATFORMS`` 里的 id 必须都是插件支持的平台。"""
+    unknown = sorted(
+        set(keys.HOST_PLATFORMS.values()) - platforms.SUPPORTED_PLATFORMS
+    )
+    assert not unknown, f"host 表里有不支持的平台 id：{unknown}"
+
+
+@pytest.mark.parametrize("url", PLATFORM_SAMPLES)
+def test_platform_of_matches_upstream(url: str, upstream_hub, keys) -> None:
+    """本地域名表必须和 ParseHub 的 parser 选择结果一致。"""
+    upstream = upstream_hub.get_platform(url)
+    assert upstream is not None, f"上游不认这条链接：{url}"
+    assert keys.platform_of(url) == upstream.id, url
 
 
 def test_every_platform_logo_exists(platforms, card) -> None:

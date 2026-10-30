@@ -96,8 +96,8 @@ async def send_card_or_text(
             fallback = build_caption(parsed, settings.max_chars)
         if defer_caption:
             return SentInfo(caption=fallback)
-        await app.delivery.send_text(sender, event, fallback)
-        return SentInfo(sent=True, caption=fallback)
+        sent = await app.delivery.send_text(sender, event, fallback)
+        return SentInfo(sent=sent, caption=fallback)
     return SentInfo(caption=body if defer_caption else "")
 
 

@@ -62,11 +62,6 @@ def _wire(
     monkeypatch.setattr(instance.client, "parse", fake_parse)
     monkeypatch.setattr(instance.client, "download", fake_download)
     monkeypatch.setattr(
-        instance.client,
-        "platform_id",
-        lambda url: asyncio.sleep(0, result=platform_id),
-    )
-    monkeypatch.setattr(
         media_mod,
         "probe_size",
         lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),

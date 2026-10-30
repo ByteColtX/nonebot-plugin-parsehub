@@ -98,7 +98,7 @@ async def deliver(
 
     entry = await _hit_cache(app, pre_key)
     if entry is not None:
-        return await _deliver_cached(app, sender, event, entry, pre_key)
+        return await _deliver_cached(app, sender, event, entry, (pre_key,))
 
     result = await _parse_work(app, sender, event, work)
     if result is not None:
@@ -284,7 +284,7 @@ async def _apply_limits(
             f"{settings.max_seconds}s，只发封面"
         )
         body = message.forward_body(work.parsed, settings)
-        await message.send_card_or_text(
+        info = await message.send_card_or_text(
             app,
             sender,
             event,
@@ -293,6 +293,8 @@ async def _apply_limits(
             work.proxy,
             caption=body or None,
         )
+        if not info.sent:
+            return Result.fail(Outcome.DELIVERY_FAILED, keys=work.all_keys)
         watch = platforms.watch_name(work.platform_id, work.display)
         return Result.fail(
             Outcome.TOO_LONG,
@@ -303,13 +305,13 @@ async def _apply_limits(
     # 短链没命中缓存（缓存里记的是展开后的 key），解析完再查一次。
     entry = await _hit_cache(app, work.post_key)
     if entry is not None:
-        return await _deliver_cached(app, sender, event, entry, work.post_key)
+        return await _deliver_cached(app, sender, event, entry, work.all_keys)
 
     work.total = len(work.refs)
     if not work.refs:
         # 纯文字帖（比如 B 站动态）：没有资源可转发，卡片后补完整正文
         body = message.forward_body(work.parsed, settings)
-        await message.send_card_or_text(
+        info = await message.send_card_or_text(
             app,
             sender,
             event,
@@ -318,6 +320,8 @@ async def _apply_limits(
             work.proxy,
             caption=body or None,
         )
+        if not info.sent:
+            return Result.fail(Outcome.DELIVERY_FAILED, keys=work.all_keys)
         return Result.fail(Outcome.NO_MEDIA, keys=work.all_keys)
 
     if work.total > MAX_MEDIA_ITEMS:
@@ -437,14 +441,15 @@ async def _deliver_cached(
     sender: Sender,
     event: MessageEvent,
     entry: CacheEntry,
-    key: str,
+    keys: tuple[str, ...],
 ) -> Result:
     """把缓存里的卡片 / 文字 + 媒体直接发出去。
 
     卡片被关掉或发卡失败时，仍要发缓存里的文字——之前会丢掉正文的地方。
     """
     settings = app.settings
-    await asyncio.to_thread(app.cache.remember_key, entry.root, key)
+    for key in keys:
+        await asyncio.to_thread(app.cache.remember_key, entry.root, key)
 
     if settings.card_enabled and entry.card is not None:
         await app.delivery.send_card(sender, event, entry.card)
@@ -464,5 +469,5 @@ async def _deliver_cached(
         files,
         caption=caption if entry.caption_in_forward else "",
     )
-    all_keys = tuple(dict.fromkeys([key, *entry.keys]))
+    all_keys = tuple(dict.fromkeys([*keys, *entry.keys]))
     return Result.delivered(report, all_keys, from_cache=True)

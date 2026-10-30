@@ -27,41 +27,45 @@ from .bilibili import (
     VIDEO_URL as _BILIBILI_VIDEO_URL,
 )
 
+# 域名 → parsehub 平台 id。白名单与平台识别共用这一份表：加平台时域名和 id
+# 写在一起，避免白名单与解析器各维护一份。
+HOST_PLATFORMS: dict[str, str] = {
+    "b23.tv": "bilibili",
+    "bili2233.cn": "bilibili",
+    "bilibili.com": "bilibili",
+    "chenzhongtech.com": "kuaishou",
+    "coolapk.com": "coolapk",
+    "douban.com": "douban",
+    "douc.cc": "douban",
+    "douyin.com": "douyin",
+    "facebook.com": "facebook",
+    "fixupx.com": "twitter",
+    "h5.pipix.com": "pipix",
+    "iesdouyin.com": "douyin",
+    "instagram.com": "instagram",
+    "izuiyou.com": "zuiyou",
+    "kuaishou.com": "kuaishou",
+    "threads.com": "threads",
+    "tieba.baidu.com": "tieba",
+    "tiktok.com": "tiktok",
+    "toutiao.com": "toutiao",
+    "twitter.com": "twitter",
+    "weibo.cn": "weibo",
+    "weibo.com": "weibo",
+    "weixin.qq.com": "weixin",
+    "x.com": "twitter",
+    "xiaochuankeji.cn": "zuiyou",
+    "xiaoheihe.cn": "xiaoheihe",
+    "xiaohongshu.com": "xhs",
+    "xhslink.cn": "xhs",
+    "xhslink.com": "xhs",
+    "youtu.be": "youtube",
+    "youtube.com": "youtube",
+    "zhihu.com": "zhihu",
+}
+
 # 预筛白名单：只认这些域名后缀（含子域名）。
-ALLOWED_HOSTS: tuple[str, ...] = (
-    "b23.tv",
-    "bili2233.cn",
-    "bilibili.com",
-    "chenzhongtech.com",
-    "coolapk.com",
-    "douban.com",
-    "douc.cc",
-    "douyin.com",
-    "facebook.com",
-    "fixupx.com",
-    "h5.pipix.com",
-    "iesdouyin.com",
-    "instagram.com",
-    "izuiyou.com",
-    "kuaishou.com",
-    "threads.com",
-    "tieba.baidu.com",
-    "tiktok.com",
-    "toutiao.com",
-    "twitter.com",
-    "weibo.cn",
-    "weibo.com",
-    "weixin.qq.com",
-    "x.com",
-    "xiaochuankeji.cn",
-    "xiaoheihe.cn",
-    "xiaohongshu.com",
-    "xhslink.cn",
-    "xhslink.com",
-    "youtu.be",
-    "youtube.com",
-    "zhihu.com",
-)
+ALLOWED_HOSTS: tuple[str, ...] = tuple(HOST_PLATFORMS)
 
 # 短链域名：路径本身没有作品信息，展开后才知道指向什么，
 # 所以只做域名过滤，不再套 URL 形状。B 站短链见 :mod:`bilibili`。
@@ -388,6 +392,30 @@ def host_allowed(host: str) -> bool:
         host == allowed or host.endswith("." + allowed)
         for allowed in ALLOWED_HOSTS
     )
+
+
+def platform_of(url: str) -> str:
+    """从链接的域名判断 parsehub 平台 id（纯字符串处理，不发请求）。
+
+    ``weixin.qq.com`` 同时承载公众号文章和视频号分享：``/sph/`` 路径与
+    ``channels.`` 子域归到 ``weixin_channels``，其余归 ``weixin``。
+
+    Args:
+        url: 链接。
+
+    Returns:
+        平台 id；域名不在白名单里时为空串。
+    """
+    parsed = urlsplit(url or "")
+    host = (parsed.hostname or "").lower()
+    for allowed, platform in HOST_PLATFORMS.items():
+        if host == allowed or host.endswith("." + allowed):
+            if platform == "weixin" and (
+                host.startswith("channels.") or parsed.path.startswith("/sph/")
+            ):
+                return "weixin_channels"
+            return platform
+    return ""
 
 
 def content_key(url: str, *, fold_case: bool = True) -> str:

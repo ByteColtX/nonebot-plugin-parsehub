@@ -262,10 +262,13 @@ def create_matchers(app: App) -> Matchers:
     async def _handle_auto(bot: Bot, event: MessageEvent) -> None:
         """自动解析消息里的链接。"""
         urls = keys.extract_targets(link_sources(event))
-        for url in urls[:MAX_LINKS_PER_MESSAGE]:
-            # 去重拦截由 service 的 claim 统一负责（查 seen + in-flight），
-            # 这里不再预筛。
-            await handle(app, bot, event, url)
+        # 并发信号量在 service 里兜底，这里直接扇出。
+        await asyncio.gather(
+            *(
+                handle(app, bot, event, url)
+                for url in urls[:MAX_LINKS_PER_MESSAGE]
+            )
+        )
 
     @parse.handle()
     async def _handle_parse(
@@ -279,8 +282,12 @@ def create_matchers(app: App) -> Matchers:
         urls = keys.extract_targets(text)
         if not urls:
             await parse.finish("用法：解析 <链接、BV 号或分享文案>")
-        for url in urls[:MAX_LINKS_PER_MESSAGE]:
-            await handle(app, bot, event, url, manual=True)
+        await asyncio.gather(
+            *(
+                handle(app, bot, event, url, manual=True)
+                for url in urls[:MAX_LINKS_PER_MESSAGE]
+            )
+        )
 
     @platform_cmd.handle()
     async def _handle_platforms() -> None:

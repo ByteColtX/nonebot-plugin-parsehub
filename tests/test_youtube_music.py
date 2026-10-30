@@ -91,11 +91,6 @@ async def test_youtube_music_sends_record(
 
     monkeypatch.setattr(
         instance.client,
-        "platform_id",
-        lambda url: asyncio.sleep(0, result="youtube"),
-    )
-    monkeypatch.setattr(
-        instance.client,
         "is_supported",
         lambda url: asyncio.sleep(0, result=True),
     )

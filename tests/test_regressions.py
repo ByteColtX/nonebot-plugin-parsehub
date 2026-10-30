@@ -21,12 +21,7 @@ URL = "https://b23.tv/abcd"
 
 
 def _patch_parse(instance, monkeypatch, *, parse=None, supported=True):
-    """把解析换成假实现，并固定平台。"""
-    monkeypatch.setattr(
-        instance.client,
-        "platform_id",
-        lambda url: asyncio.sleep(0, result="bilibili"),
-    )
+    """把解析换成假实现。"""
     monkeypatch.setattr(
         instance.client,
         "is_supported",
@@ -99,6 +94,41 @@ async def test_duplicate_auto_message_is_silent(
     assert bot.calls == []
 
 
+async def test_start_reaction_does_not_gate_parse(
+    instance, service, feedback, monkeypatch
+) -> None:
+    """START 只是反馈：协议端没回包时，解析不能跟着停。"""
+    gate = asyncio.Event()
+    parse_done = asyncio.Event()
+    emojis: list[str] = []
+
+    async def slow_call_api(api, **kwargs):
+        if api == "set_msg_emoji_like":
+            emojis.append(kwargs["emoji_id"])
+            if len(emojis) == 1:
+                await gate.wait()
+        return {"status": "ok", "retcode": 0, "data": None}
+
+    async def fake_parse(url, proxy="", cookie=""):
+        parse_done.set()
+        return FakeParseResult(media=None)
+
+    _patch_parse(instance, monkeypatch, parse=fake_parse)
+    bot = FakeBot()
+    monkeypatch.setattr(bot, "call_api", slow_call_api)
+
+    task = asyncio.create_task(
+        service.handle(instance, bot, make_group_event(URL), URL)
+    )
+    await asyncio.wait_for(parse_done.wait(), 1)
+    assert not task.done(), "START 还没回包，解析完成后 handle 不该结束"
+
+    gate.set()
+    result = await asyncio.wait_for(task, 1)
+    assert result.outcome is service.Outcome.NO_MEDIA
+    assert emojis == [feedback.Reaction.START, feedback.Reaction.OK]
+
+
 async def test_image_rejection_does_not_escape(
     instance, service, monkeypatch, tmp_path: Path
 ) -> None:
@@ -147,30 +177,6 @@ async def test_image_rejection_does_not_escape(
         kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
     ]
     assert "5" in emojis, emojis
-
-
-async def test_platform_id_is_looked_up_once(
-    instance, service, monkeypatch
-) -> None:
-    """P2-4：一个链接只查一次平台。"""
-    calls = {"platform": 0}
-
-    async def platform_id(url):
-        calls["platform"] += 1
-        return "bilibili"
-
-    monkeypatch.setattr(instance.client, "platform_id", platform_id)
-    monkeypatch.setattr(
-        instance.client, "is_supported", lambda url: asyncio.sleep(0, True)
-    )
-
-    async def boom(url, proxy="", cookie=""):
-        raise RuntimeError("炸了")
-
-    monkeypatch.setattr(instance.client, "parse", boom)
-    await service.handle(instance, FakeBot(), make_group_event(URL), URL)
-
-    assert calls["platform"] == 1
 
 
 async def test_download_timeout_is_not_retried(
@@ -304,11 +310,6 @@ async def test_support_check_failure_falls_through_to_parse(
     instance, service, monkeypatch
 ) -> None:
     """is_supported 自己炸了不该把整条消息吞掉，交给解析去报错。"""
-    monkeypatch.setattr(
-        instance.client,
-        "platform_id",
-        lambda url: asyncio.sleep(0, result="bilibili"),
-    )
 
     async def broken(url):
         raise RuntimeError("判断失败")
@@ -479,3 +480,97 @@ async def test_truncated_notice_via_result(
         i for i, (api, _) in enumerate(calls) if api == "set_msg_emoji_like"
     )
     assert notice_idx < emoji_idx, "提示要早于终态表情"
+
+
+async def test_post_cache_hit_releases_pre_key(
+    instance, service, update_settings, monkeypatch, tmp_path: Path
+) -> None:
+    """解析后命中缓存，也要把当前短链的 key 交给去重收尾。"""
+    media = tmp_path / "a.mp4"
+    media.write_bytes(b"media")
+    instance.cache.store(["bilibili:bv1a2xl67emp"], [media], seconds=10)
+    # 0 表示不裁剪 inflight，漏掉的 key 永远不会自己过期。
+    update_settings(dedupe_seconds=0)
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(
+            raw_url="https://www.bilibili.com/video/BV1A2xL67EMP"
+        )
+
+    _patch_parse(instance, monkeypatch, parse=fake_parse)
+    result = await service.handle(
+        instance, FakeBot(), make_group_event(URL), URL
+    )
+
+    assert result.outcome is service.Outcome.FROM_CACHE
+    assert instance.dedupe.claim("group:123456", ["b23.tv/abcd"], 0), (
+        "短链 key 还留在 inflight 里，下一次同链接会被静默丢弃"
+    )
+
+
+class _DeadSendBot(FakeBot):
+    """send_msg 全部失败的协议端。"""
+
+    async def call_api(self, api, **kwargs):
+        if api == "send_msg":
+            raise RuntimeError("send failed")
+        return await super().call_api(api, **kwargs)
+
+
+async def test_too_long_send_failure_is_delivery_failed(
+    instance, service, feedback, update_settings, monkeypatch
+) -> None:
+    """超时长只发封面时，卡片和文字都失败不能算成功。"""
+    update_settings(max_seconds=300)
+    ref = FakeMediaRef("https://cdn.example.com/a.mp4")
+    ref.duration = 400
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(media=ref)
+
+    _patch_parse(instance, monkeypatch, parse=fake_parse)
+    bot = _DeadSendBot()
+    result = await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert result.outcome is service.Outcome.DELIVERY_FAILED
+    emojis = [
+        kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
+    ]
+    assert emojis[-1] == feedback.Reaction.FAIL
+
+
+async def test_no_media_send_failure_is_delivery_failed(
+    instance, service, monkeypatch
+) -> None:
+    """纯文字帖卡片和正文都发不出去时，结局不能是 NO_MEDIA。"""
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(media=None)
+
+    _patch_parse(instance, monkeypatch, parse=fake_parse)
+    bot = _DeadSendBot()
+    result = await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert result.outcome is service.Outcome.DELIVERY_FAILED
+
+
+async def test_post_parse_duplicate_gets_terminal_reaction(
+    instance, service, feedback, monkeypatch
+) -> None:
+    """解析后才发现的重复也要收尾，不能把消息永远留在 START。"""
+    instance.dedupe.commit("group:123456", ["bilibili:bv1a2xl67emp"])
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(
+            raw_url="https://www.bilibili.com/video/BV1A2xL67EMP"
+        )
+
+    _patch_parse(instance, monkeypatch, parse=fake_parse)
+    bot = FakeBot()
+    result = await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert result.outcome is service.Outcome.DUPLICATE
+    emojis = [
+        kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
+    ]
+    assert emojis == [feedback.Reaction.START, feedback.Reaction.OK]

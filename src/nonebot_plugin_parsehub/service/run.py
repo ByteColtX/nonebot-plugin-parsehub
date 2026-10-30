@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
@@ -75,18 +76,12 @@ async def handle(
     """
     settings = app.settings
     session = session_key(event)
-    try:
-        if bilibili_live.is_live_url(url):
-            # 直播间不在 ParseHub 的平台表里，手动归到 bilibili，
-            # 让白名单 / 代理设置跟普通 B 站链接走同一套
-            platform = "bilibili"
-        else:
-            platform = await app.client.platform_id(url) or ""
-    except Exception as exc:  # 平台识别失败按未知平台继续
-        logger.warning(
-            f"[parsehub] 平台识别失败 {url}: {type(exc).__name__}: {exc}"
-        )
-        platform = ""
+    if bilibili_live.is_live_url(url):
+        # 直播间不在 ParseHub 的平台表里，手动归到 bilibili，
+        # 让白名单 / 代理设置跟普通 B 站链接走同一套
+        platform = "bilibili"
+    else:
+        platform = keys.platform_of(url)
 
     # 平台白名单：被关掉的平台连「收到」都不点，免得看起来像在解析。
     if platform and not settings.platform_allowed(platform):
@@ -103,7 +98,9 @@ async def handle(
         logger.info(f"[parsehub] {pre_key} 在本会话刚处理过，跳过")
         return Result.fail(Outcome.DUPLICATE, keys=(pre_key,))
 
-    await feedback.react(sender, event, feedback.Reaction.START)
+    start_reaction = asyncio.create_task(
+        feedback.react(sender, event, feedback.Reaction.START)
+    )
 
     async def pipeline() -> Result:
         return await works.deliver(
@@ -115,6 +112,7 @@ async def handle(
         sender,
         event,
         pipeline,
+        start_reaction=start_reaction,
         manual=manual,
         label=f"{url}（{platform or '未知平台'}）",
         dedupe=True,
@@ -160,7 +158,9 @@ async def handle_audio(
         return Result.fail(Outcome.PLATFORM_OFF)
 
     key = audio.cache_key(target)
-    await feedback.react(sender, event, feedback.Reaction.START)
+    start_reaction = asyncio.create_task(
+        feedback.react(sender, event, feedback.Reaction.START)
+    )
 
     async def pipeline() -> Result:
         return await deliver_audio(
@@ -172,6 +172,7 @@ async def handle_audio(
         sender,
         event,
         pipeline,
+        start_reaction=start_reaction,
         # 音频不参与会话去重（dedupe=False），manual 只在去重分支里被读
         manual=False,
         label=f"音频 {target}（{platform}）",
@@ -187,6 +188,7 @@ async def _execute(
     event: MessageEvent,
     pipeline: Callable[[], Awaitable[Result]],
     *,
+    start_reaction: asyncio.Task[None],
     manual: bool,
     label: str,
     dedupe: bool,
@@ -200,6 +202,7 @@ async def _execute(
         sender: 协议端接口。
         event: 触发消息事件。
         pipeline: 无参协程，信号量内执行的实际处理。
+        start_reaction: 已发出的 START 表情任务；收尾前 join，保证表情顺序。
         manual: 是否为命令触发（不参与去重拦截）。
         label: 写日志用的描述。
         dedupe: 是否做去重提交 / 释放（音频不参与）。
@@ -221,12 +224,17 @@ async def _execute(
             keys=(base_key,),
         )
 
+    # START 是后台发的：收尾前先 join，保证提示和终态表情都排在它后面。
+    await start_reaction
     if result.notice:
         await app.delivery.send_text(sender, event, result.notice)
-    # 重复是静默的：前面已经点过「收到」的话也到此为止，不再补一个失败表情。
-    if result.outcome is not Outcome.DUPLICATE:
-        reaction = feedback.Reaction.OK if result.ok else feedback.Reaction.FAIL
-        await feedback.react(sender, event, reaction)
+    # 走到这里的都点过「收到」：重复也要收尾，否则消息会一直停在 START。
+    reaction = (
+        feedback.Reaction.OK
+        if result.ok or result.outcome is Outcome.DUPLICATE
+        else feedback.Reaction.FAIL
+    )
+    await feedback.react(sender, event, reaction)
 
     if dedupe:
         # 手动命令不参与去重：既不拦也不记，和旧行为一致。

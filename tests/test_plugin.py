@@ -24,13 +24,8 @@ from nonebot.adapters.onebot.v11.exception import ActionFailed
 
 
 @pytest.fixture(autouse=True)
-def _reset_state(plugin, monkeypatch, instance):
+def _reset_state(plugin, instance):
     instance.dedupe._seen.clear()
-
-    async def _fake_platform_id(url):
-        return "bilibili"
-
-    monkeypatch.setattr(instance.client, "platform_id", _fake_platform_id)
     yield
     instance.dedupe._seen.clear()
 
@@ -1848,3 +1843,27 @@ async def test_send_media_files_caps_items(
 
     fwd = dict(bot.calls)["send_group_forward_msg"]
     assert len(fwd["messages"]) == media_mod.MAX_MEDIA_ITEMS
+
+
+@pytest.mark.asyncio
+async def test_multi_link_message_fans_out(
+    instance, matchers, triggers, monkeypatch
+) -> None:
+    """一条消息里的多个链接并发处理，先开始的不挡住后面的。"""
+    started: list[str] = []
+    gate = asyncio.Event()
+
+    async def fake_handle(app, bot, event, url, manual=False):
+        started.append(url)
+        if len(started) == 2:
+            gate.set()
+        await asyncio.wait_for(gate.wait(), 1)
+
+    monkeypatch.setattr(triggers, "handle", fake_handle)
+    event = make_group_event(
+        "https://b23.tv/aaaa https://b23.tv/bbbb", message_id=42
+    )
+
+    await matchers.auto.handlers[0].call(FakeBot(), event)
+
+    assert started == ["https://b23.tv/aaaa", "https://b23.tv/bbbb"]

@@ -253,11 +253,6 @@ async def test_post_key_hit_respects_duration_limit(
 
     monkeypatch.setattr(
         instance.client,
-        "platform_id",
-        lambda url: asyncio.sleep(0, result="bilibili"),
-    )
-    monkeypatch.setattr(
-        instance.client,
         "is_supported",
         lambda url: asyncio.sleep(0, result=True),
     )
