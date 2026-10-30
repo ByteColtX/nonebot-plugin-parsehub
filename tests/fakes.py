@@ -82,6 +82,10 @@ class FakeBot(Bot):
     def sent_records(self) -> list[str]:
         return self._segment_files("record")
 
+    @property
+    def sent_videos(self) -> list[str]:
+        return self._segment_files("video")
+
     def uploaded_files(self) -> list[tuple[str, str]]:
         return [
             (kw.get("file", ""), kw.get("name", ""))
