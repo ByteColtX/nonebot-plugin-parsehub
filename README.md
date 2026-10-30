@@ -126,6 +126,7 @@ plugins = ["nonebot_plugin_parsehub"]
 - B 站链接带 `?p=N` 解析第 N P（默认 P1）；`bm` 认完整链接 / 短链 / 分享文案 / 裸 BV（不支持 AV 号）；
   `ym` 认 `youtube.com`（含 music / shorts）、`youtu.be`、单独 11 位视频 ID
 - `music.youtube.com` 自动按音乐处理：卡片标「音乐」，只下载音频并发 `record` 语音，不下载视频
+- YouTube 视频自带 ffmpeg 合并音视频（系统已装则优先用系统），没装 ffmpeg 也不会再发无声视频
 - 音频默认发 record 语音，B 站免登录最高 192kbps AAC；与 `/解析` 共用开关、白名单、
   代理与体积上限；时长上限对音频不生效；直播 / 预告 / 番剧不给提取
 - 单个作品最多发 **20 项**，超出部分不发并附提示

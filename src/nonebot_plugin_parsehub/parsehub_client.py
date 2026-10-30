@@ -14,10 +14,13 @@ numpy / opencv（数秒），因此实例是懒加载的，并由 ``App`` 在启
 from __future__ import annotations
 
 import asyncio
+import shutil
 import tomllib
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+from nonebot import logger
 
 # 多文件并发下载数（parsehub 2.3.10 起支持）。下载以网络等待为主，并发比串行快
 # 很多；但内存只有 1G 上下的机器别开太大。
@@ -242,12 +245,62 @@ class ParseHubClient:
         )
 
 
+def _ensure_ffmpeg_available() -> str | None:
+    """确保 yt-dlp 能找到 ffmpeg，否则音视频不会合并。
+
+    ParseHub 的 yt-dlp 下载默认走 ``bestvideo+bestaudio``，没有 ffmpeg 时
+    会落成两个文件，随后只取到 video-only 的那个——用户看到的就是无声视频，
+    或者把 audio-only 当视频发出去。系统没装 ffmpeg 时用 ``imageio-ffmpeg``
+    自带的二进制，并给下载命令注入 ``--ffmpeg-location``。
+
+    Returns:
+        实际使用的 ffmpeg 路径；不需要或拿不到时为 ``None``。
+    """
+    system = shutil.which("ffmpeg")
+    if system:
+        return system
+    try:
+        import imageio_ffmpeg
+
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as exc:  # 没装 bundle / 平台不支持时保持原行为
+        logger.warning(f"[parsehub] 找不到 ffmpeg，音视频可能无法合并: {exc}")
+        return None
+
+    try:
+        from parsehub.parsers.base.ytdlp import YtVideoParseResult
+        from parsehub.parsers.parser.youtube import YtbVideoParseResult
+    except Exception as exc:  # parsehub 版本变了就退回原行为
+        logger.warning(f"[parsehub] 无法注入 ffmpeg 路径: {exc}")
+        return None
+
+    for cls in (YtVideoParseResult, YtbVideoParseResult):
+        if getattr(cls, "_parsehub_ffmpeg_patched", False):
+            continue
+        original = cls.cli_args.fget
+        if original is None:
+            continue
+
+        def cli_args(
+            self: Any,
+            _original: Any = original,
+            _exe: str = exe,
+        ) -> list[str]:
+            return [*_original(self), "--ffmpeg-location", _exe]
+
+        cls.cli_args = property(cli_args)
+        cls._parsehub_ffmpeg_patched = True
+    logger.info(f"[parsehub] 使用内置 ffmpeg: {exe}")
+    return exe
+
+
 def _import_parsehub() -> Any:
     """在线程里导入 parsehub 并构造实例。
 
     Returns:
-        新的 ParseHub 实例。
+        ParseHub 实例。
     """
+    _ensure_ffmpeg_available()
     from parsehub import ParseHub
 
     return ParseHub()
