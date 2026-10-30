@@ -114,8 +114,8 @@ def platforms(plugin):
 
 @pytest.fixture(scope="session")
 def live_mod(plugin):
-    """直播间封面模块。"""
-    return plugin.live
+    """B 站直播间封面模块。"""
+    return plugin.bilibili_live
 
 
 @pytest.fixture(scope="session")
@@ -173,6 +173,15 @@ def update_settings(instance, monkeypatch):
 def matchers(instance, triggers):
     """按当前实例注册一套 matcher（测试用）。"""
     return triggers.create_matchers(instance)
+
+
+@pytest.fixture()
+def tmp_media(tmp_path, monkeypatch, instance):
+    """把中转服务的根目录指到临时目录。"""
+    monkeypatch.setattr(instance.relay, "root", tmp_path)
+    monkeypatch.setattr(instance.endpoint, "host", "127.0.0.1")
+    monkeypatch.setattr(instance.endpoint, "port", 18899)
+    return tmp_path
 
 
 @pytest.fixture(autouse=True)

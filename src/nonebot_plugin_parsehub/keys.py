@@ -17,6 +17,16 @@ import re
 from collections.abc import Iterator
 from urllib.parse import parse_qsl, urlsplit
 
+from .bilibili import (
+    BV_PATTERN as _BV_PATTERN,
+)
+from .bilibili import (
+    SHORT_HOSTS as _BILIBILI_SHORT_HOSTS,
+)
+from .bilibili import (
+    VIDEO_URL as _BILIBILI_VIDEO_URL,
+)
+
 # 预筛白名单：只认这些域名后缀（含子域名）。
 ALLOWED_HOSTS: tuple[str, ...] = (
     "b23.tv",
@@ -57,9 +67,9 @@ ALLOWED_HOSTS: tuple[str, ...] = (
 )
 
 # 短链域名：路径本身没有作品信息，展开后才知道指向什么，
-# 所以只做域名过滤，不再套 URL 形状。
+# 所以只做域名过滤，不再套 URL 形状。B 站短链见 :mod:`bilibili`。
 _SHORT_HOSTS = frozenset(
-    {"b23.tv", "bili2233.cn", "douc.cc", "xhslink.com", "xhslink.cn"}
+    {*_BILIBILI_SHORT_HOSTS, "douc.cc", "xhslink.com", "xhslink.cn"}
 )
 
 # 内容域名的 URL 形状：对齐 ParseHub 各解析器的 __match__。
@@ -227,18 +237,10 @@ _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
-# 裸 BV 号：消息里只有作品号、没有链接时也当成 B 站视频。前后不能紧贴字母数字，
-# 免得把 ``xBV...`` 或更长的串切一段出来。
-_BV_PATTERN = re.compile(r"(?<![0-9A-Za-z])(BV[0-9A-Za-z]{10})(?![0-9A-Za-z])")
-
-# 裸 BV 号拼成的标准链接，和用户直接发完整链接走同一套 key / 缓存。
-_BILIBILI_VIDEO_URL = "https://www.bilibili.com/video/{}"
+# 裸 BV 号：见 :mod:`bilibili`（与 audio 共用同一份模式）。
 
 # 归一化时要去掉的主机名前缀（m.bilibili.com 与 www.bilibili.com 是同一个站）。
 _HOST_PREFIXES = ("www.", "m.", "mobile.")
-
-# B 站短链没有作品 ID，但分P要进 key，否则同一个短链的不同 P 会撞缓存。
-_BILIBILI_SHORT_HOSTS = ("b23.tv", "bili2233.cn")
 
 
 def _bilibili_part(url: str) -> int:
