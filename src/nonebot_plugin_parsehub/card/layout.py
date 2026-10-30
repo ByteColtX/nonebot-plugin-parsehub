@@ -148,6 +148,18 @@ def meta_line(result: Any, media_count: int, is_ms: bool) -> str:
             parts.append(f"房间 {room_id}")
         return " · ".join(parts)
 
+    if getattr(result, "music", False):
+        parts = ["音乐"]
+        media = getattr(result, "media", None)
+        items = list(media) if isinstance(media, (list, tuple)) else [media]
+        first = next((item for item in items if item), None)
+        duration = format_duration(
+            int(getattr(first, "duration", 0) or 0), is_ms=is_ms
+        )
+        if duration:
+            parts.append(duration)
+        return " · ".join(parts)
+
     parts = [TYPE_LABELS.get(post_type, "媒体")]
     media = getattr(result, "media", None)
     items = list(media) if isinstance(media, (list, tuple)) else [media]

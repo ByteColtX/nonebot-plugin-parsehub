@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from urllib.parse import urlsplit
 
 # 平台 id → (展示名, 品牌色, logo 文件名)。
 # 别名（xhs / wechat / twitter / baidu）与主 id 指向同一套展示信息，方便白名单
@@ -109,6 +110,18 @@ def normalise_platform(name: str) -> str:
         if display.lower() == key
     }
     return matches.pop() if len(matches) == 1 else key
+
+
+def is_youtube_music(url: str) -> bool:
+    """链接是不是 YouTube Music。
+
+    Args:
+        url: 原始链接或解析结果里的链接。
+
+    Returns:
+        ``music.youtube.com`` 返回 True。
+    """
+    return (urlsplit(url).hostname or "").lower() == "music.youtube.com"
 
 
 def display_name(platform_id: str) -> str:
