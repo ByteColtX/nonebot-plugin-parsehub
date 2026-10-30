@@ -29,9 +29,9 @@ class SentInfo:
     """一次「卡片或文字」发送的结果，顺手带上内容好写进媒体缓存。
 
     Attributes:
-        sent: 是否真的发出去了。
+        sent: 是否真的发出去了（延迟正文时，卡片成功也算 True）。
         card: 发出去的卡片图路径，没出卡为 ``None``。
-        caption: 发出去的文字，没发文字为空串。
+        caption: 要写进缓存的文字；长正文可能由调用方放进合并转发。
     """
 
     sent: bool = False
@@ -48,6 +48,8 @@ async def send_card_or_text(
     proxy: str = "",
     *,
     allow_text: bool = True,
+    caption: str | None = None,
+    defer_caption: bool = False,
 ) -> SentInfo:
     """优先发卡片图，卡片不可用时退回文字。
 
@@ -61,11 +63,15 @@ async def send_card_or_text(
         allow_text: 出不了卡时是否立刻退回文字。下载前那次调用要传 ``False``，
             否则文字先发了，等下载完再抽帧出卡就成了重复消息。卡片成功时，
             没有标题的正文帖仍会补发正文（卡片只放得下摘要）。
+        caption: 调用方指定的正文（长正文平台会放进合并转发）。为 ``None``
+            时沿用「无标题才补正文」的旧规则。
+        defer_caption: 只返回正文、不单独发送；由调用方把它和媒体合并转发。
 
     Returns:
         发出去了什么（卡片路径 / 文字），用来写媒体缓存。
     """
     settings = app.settings
+    body = _body_only_caption(parsed, settings) if caption is None else caption
     if settings.card_enabled:
         out_path = await app.cards.render(
             parsed, [file.path for file in files], None, proxy
@@ -73,15 +79,43 @@ async def send_card_or_text(
         if out_path is not None and await app.delivery.send_card(
             sender, event, out_path
         ):
-            caption = _body_only_caption(parsed, settings)
-            if caption:
-                await app.delivery.send_text(sender, event, caption)
-            return SentInfo(sent=True, card=out_path, caption=caption)
+            if body and not defer_caption:
+                await app.delivery.send_text(sender, event, body)
+            return SentInfo(sent=True, card=out_path, caption=body)
     if allow_text and settings.send_text:
-        caption = build_caption(parsed, settings.max_chars)
-        await app.delivery.send_text(sender, event, caption)
-        return SentInfo(sent=True, caption=caption)
-    return SentInfo()
+        if caption is not None:
+            fallback = body
+        else:
+            fallback = build_caption(parsed, settings.max_chars)
+        if defer_caption:
+            return SentInfo(caption=fallback)
+        await app.delivery.send_text(sender, event, fallback)
+        return SentInfo(sent=True, caption=fallback)
+    return SentInfo(caption=body if defer_caption else "")
+
+
+def forward_body(parsed: Any, settings: Any) -> str:
+    """取要跟媒体一起合并转发的正文。
+
+    酷安 / 微博 / 知乎等正文型平台的正文可能长到卡片放不下；正文为空、
+    平台只适合短文案或用户关了文字发送时返回空串。
+
+    Args:
+        parsed: ParseHub 解析结果。
+        settings: 插件设置。
+
+    Returns:
+        要放进合并转发的正文；不需要时为空串。
+    """
+    if not settings.send_text:
+        return ""
+    platform = getattr(parsed, "platform", None)
+    platform_id = str(getattr(platform, "id", "") or "")
+    post_type = str(getattr(getattr(parsed, "type", None), "value", "") or "")
+    content = str(getattr(parsed, "content", "") or "")
+    if not platforms.needs_body_forward(platform_id, post_type, content):
+        return ""
+    return excerpt(content, settings.max_chars)
 
 
 def _body_only_caption(parsed: Any, settings: Any) -> str:
