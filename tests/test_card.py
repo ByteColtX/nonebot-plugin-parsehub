@@ -121,6 +121,35 @@ def test_platform_of_known_and_unknown(card) -> None:
     assert slug == "x"
 
 
+@pytest.mark.parametrize(
+    ("platform_id", "expected"),
+    [
+        ("youtube", "YouTube"),
+        ("tiktok", "TikTok"),
+        ("instagram", "Instagram"),
+        ("bilibili", "bilibili"),
+    ],
+)
+def test_kicker_keeps_official_case(
+    tmp_path: Path, card, monkeypatch, platform_id: str, expected: str
+) -> None:
+    """平台名按官方大小写绘制，不能整行转大写。"""
+    drawn: list[str] = []
+    monkeypatch.setattr(
+        card.layout,
+        "draw_text",
+        lambda *args, **kwargs: drawn.append(args[2]),
+    )
+    out = tmp_path / f"{platform_id}.jpg"
+    assert (
+        card.layout.render(
+            FakeResult(platform_id=platform_id), _cover_bytes(540, 960), out
+        )
+        is True
+    )
+    assert drawn[0] == expected
+
+
 def test_wrap_keeps_hashtag_whole(card) -> None:
     """话题标签不会被从中间劈开。"""
     font = card.fonts.font_for(58, 700)
