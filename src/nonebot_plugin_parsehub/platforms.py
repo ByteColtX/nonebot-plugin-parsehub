@@ -82,10 +82,11 @@ WATCH_NAMES: dict[str, str] = {
     "wechat": "微信",
 }
 
-# duration 单位上游各平台不统一：抖音 / 小红书给的是毫秒，其它是秒。
-# 新平台要实测：下载媒体用 cv2 量真实时长核对（TikTok 就是这样确认是秒的——
-# 报告 12，cv2 量出 30fps × 366 帧 = 12.20s，早先当毫秒会显示成 00:00）。
-MS_PLATFORMS = frozenset({"douyin", "xhs"})
+# duration 单位上游各平台不统一：抖音 / 小红书 / 快手给的是毫秒，其它是秒。
+# 新平台要实测：下载媒体用 cv2 / ffprobe 量真实时长核对（TikTok 就是这样确认
+# 是秒的——报告 12，量出 12.20s，早先当毫秒会显示成 00:00；快手报告 11933，
+# 实际 11.93s）。
+MS_PLATFORMS = frozenset({"douyin", "xhs", "kuaishou"})
 
 
 def normalise_platform(name: str) -> str:

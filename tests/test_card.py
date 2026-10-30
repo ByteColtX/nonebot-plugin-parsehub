@@ -88,11 +88,14 @@ def test_tiktok_duration_is_seconds(card) -> None:
     assert card.layout.platform_uses_milliseconds(tiktok) is False
     assert card.layout.meta_line(tiktok, 1, False) == "视频 · 00:12"
 
-    # 抖音 / 小红书仍然是毫秒
+    # 抖音 / 小红书 / 快手仍然是毫秒
     assert card.layout.platform_uses_milliseconds(
         FakeResult(platform_id="douyin")
     )
     assert card.layout.platform_uses_milliseconds(FakeResult(platform_id="xhs"))
+    kuaishou = FakeResult(platform_id="kuaishou", media=FakeRef(duration=11933))
+    assert card.layout.platform_uses_milliseconds(kuaishou)
+    assert card.layout.meta_line(kuaishou, 1, True) == "视频 · 00:11"
     # 毫秒 → 秒的换算由 platforms.duration_seconds 负责，
     # 服务侧行为在 test_duration_limit.py 里经完整链路覆盖。
 
