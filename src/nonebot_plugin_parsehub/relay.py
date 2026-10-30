@@ -27,6 +27,7 @@ import uuid
 from functools import partial
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 # 探测内网 IP 时用的哑地址，只用来让内核选出口网卡，不会真的发包。
 _PROBE_ADDRESS = ("10.255.255.255", 1)
@@ -134,7 +135,8 @@ class MediaRelay:
             ValueError: 文件不在 :attr:`root` 之下。
         """
         relative = path.resolve().relative_to(self.root.resolve())
-        return f"http://{host}:{port}/{relative.as_posix()}"
+        encoded = quote(relative.as_posix(), safe="/")
+        return f"http://{host}:{port}/{encoded}"
 
     def cleanup(self, keep_seconds: int) -> int:
         """删除过期的任务目录。
