@@ -146,6 +146,18 @@ def kind_of(path: Path) -> MediaKind:
     return MediaKind.FILE
 
 
+def is_video_ref(ref: MediaRef) -> bool:
+    """远程引用是不是视频（按扩展名判断）。
+
+    Args:
+        ref: 解析结果里的远程媒体引用。
+
+    Returns:
+        扩展名属于视频集合时返回 True。
+    """
+    return bool(ref.ext) and f".{ref.ext}" in VIDEO_EXTENSIONS
+
+
 def _items(value: Any) -> list[Any]:  # parsehub 的结果对象
     """把可能为单个值的 ``media`` 统一成列表。
 
