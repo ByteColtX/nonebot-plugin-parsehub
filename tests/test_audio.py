@@ -328,7 +328,7 @@ def test_file_stem_part_suffix(audio):
 # --------------------------------------------------------------------------- #
 def test_cache_key_isolated_from_video(audio, keys):
     """音频 key 带 audio: 前缀，不与视频缓存撞。"""
-    assert audio.cache_key(_BILI_URL) == "audio:bilibili:bv1a2xl67emp"
+    assert audio.cache_key(_BILI_URL) == "audio:bilibili:BV1A2xL67EMP"
     assert keys.content_key(_BILI_URL) == "bilibili:bv1a2xl67emp"
 
 
@@ -336,26 +336,35 @@ def test_cache_key_includes_part(audio):
     """分P进 key，不同 P 不撞缓存。"""
     assert (
         audio.cache_key("https://www.bilibili.com/video/BV1pTap6UE1w/?p=2")
-        == "audio:bilibili:bv1ptap6ue1w:p2"
+        == "audio:bilibili:BV1pTap6UE1w:p2"
     )
     assert (
         audio.cache_key("https://www.bilibili.com/video/BV1pTap6UE1w/")
-        == "audio:bilibili:bv1ptap6ue1w"
+        == "audio:bilibili:BV1pTap6UE1w"
     )
 
 
 def test_cache_key_youtube_variants(audio):
-    """YouTube 的各种写法归一成同一个音频 key。"""
+    """YouTube 的各种写法归一成同一个音频 key，ID 大小写保留。"""
     assert audio.cache_key("https://youtu.be/aqz-KE-bpKQ") == (
-        "audio:youtube:aqz-ke-bpkq"
+        "audio:youtube:aqz-KE-bpKQ"
     )
     assert (
         audio.cache_key("https://www.youtube.com/watch?v=aqz-KE-bpKQ&list=RDMM")
-        == "audio:youtube:aqz-ke-bpkq"
+        == "audio:youtube:aqz-KE-bpKQ"
     )
     assert audio.cache_key("https://youtu.be/aqz-KE-bpKQ?si=x") == (
-        "audio:youtube:aqz-ke-bpkq"
+        "audio:youtube:aqz-KE-bpKQ"
     )
+
+
+def test_cache_key_youtube_keeps_id_case(audio):
+    """只差大小写的两个 YouTube ID 不能撞进同一份缓存。"""
+    lower = audio.cache_key("https://youtu.be/aqz-KE-bpKQ")
+    upper = audio.cache_key("https://youtu.be/AQZ-KE-BPKQ")
+    assert lower == "audio:youtube:aqz-KE-bpKQ"
+    assert upper == "audio:youtube:AQZ-KE-BPKQ"
+    assert lower != upper
 
 
 def test_music_youtube_shape_now_allowed(keys):
@@ -410,7 +419,7 @@ async def test_handle_audio_bm_sends_record(
         plugin.feedback.Reaction.START,
         plugin.feedback.Reaction.OK,
     ], emojis
-    assert "audio:bilibili:bv1a2xl67emp" in result.keys
+    assert "audio:bilibili:BV1A2xL67EMP" in result.keys
 
 
 @pytest.mark.asyncio
@@ -763,7 +772,7 @@ async def test_handle_audio_ym_sends_record(
     assert result.outcome is service.Outcome.DELIVERED
     assert len(bot.sent_records) == 1
     assert bot.sent_records[0].endswith(".m4a")
-    assert "audio:youtube:aqz-ke-bpkq" in result.keys
+    assert "audio:youtube:aqz-KE-bpKQ" in result.keys
 
 
 @pytest.mark.asyncio
