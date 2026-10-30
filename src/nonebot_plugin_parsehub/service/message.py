@@ -59,7 +59,8 @@ async def send_card_or_text(
         files: 已下载的本地媒体。
         proxy: 取封面用的代理。
         allow_text: 出不了卡时是否立刻退回文字。下载前那次调用要传 ``False``，
-            否则文字先发了，等下载完再抽帧出卡就成了重复消息。
+            否则文字先发了，等下载完再抽帧出卡就成了重复消息。卡片成功时，
+            没有标题的正文帖仍会补发正文（卡片只放得下摘要）。
 
     Returns:
         发出去了什么（卡片路径 / 文字），用来写媒体缓存。
@@ -72,12 +73,37 @@ async def send_card_or_text(
         if out_path is not None and await app.delivery.send_card(
             sender, event, out_path
         ):
-            return SentInfo(sent=True, card=out_path)
+            caption = _body_only_caption(parsed, settings)
+            if caption:
+                await app.delivery.send_text(sender, event, caption)
+            return SentInfo(sent=True, card=out_path, caption=caption)
     if allow_text and settings.send_text:
         caption = build_caption(parsed, settings.max_chars)
         await app.delivery.send_text(sender, event, caption)
         return SentInfo(sent=True, caption=caption)
     return SentInfo()
+
+
+def _body_only_caption(parsed: Any, settings: Any) -> str:
+    """没有标题、只有正文时，卡片后补发的文字。
+
+    卡片标题最多三行，微博 / 酷安这类正文帖会被截断；补一条文字把正文
+    发全。有标题的帖子不补，避免和卡片重复。
+
+    Args:
+        parsed: ParseHub 解析结果。
+        settings: 插件设置。
+
+    Returns:
+        要补发的文字；不需要时为空串。
+    """
+    if not settings.send_text:
+        return ""
+    title = str(getattr(parsed, "title", "") or "").strip()
+    content = str(getattr(parsed, "content", "") or "").strip()
+    if title or not content:
+        return ""
+    return build_caption(parsed, settings.max_chars)
 
 
 def build_caption(parsed: Any, max_chars: int) -> str:
