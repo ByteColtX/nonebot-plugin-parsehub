@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageEvent
 
 from .. import platforms
@@ -76,6 +77,12 @@ async def send_card_or_text(
         out_path = await app.cards.render(
             parsed, [file.path for file in files], None, proxy
         )
+        if out_path is None:
+            if files or allow_text:
+                logger.info("[parsehub] 没有可用封面，卡片跳过")
+            else:
+                # 下载前那次没封面是正常的：下载后还会用视频帧重试。
+                logger.debug("[parsehub] 暂时没有封面，下载后重试")
         if out_path is not None and await app.delivery.send_card(
             sender, event, out_path
         ):

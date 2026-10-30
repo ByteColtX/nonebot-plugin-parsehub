@@ -97,7 +97,6 @@ class CardRenderer:
                 cover.fetch_cover, result, files, proxy
             )
             if picture is None:
-                logger.info("[parsehub] 没有可用封面，卡片跳过")
                 return None
             target_dir = task_dir or self._new_task_dir()
             out_path = target_dir / "card.jpg"
