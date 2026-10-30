@@ -87,7 +87,7 @@ plugins = ["nonebot_plugin_parsehub"]
 | `PARSEHUB_FORWARD_TIMEOUT` | 否 | `60` | 合并转发等待协议端的秒数，超时才逐条发 |
 | `PARSEHUB_SEND_TEXT` | 否 | `true` | 是否发送标题 / 正文 |
 | `PARSEHUB_MAX_CHARS` | 否 | `300` | 正文最多发送多少字符 |
-| `PARSEHUB_FAIL_NOTICE` | 否 | `true` | 视频发送失败时是否额外发文字提示 |
+| `PARSEHUB_FAIL_NOTICE` | 否 | `true` | 媒体发送失败时是否额外发文字提示 |
 | `PARSEHUB_DELIVERY` | 否 | `file` | 媒体交给协议端：`file` = 本机路径（要求同机）/ `http` = 中转地址 / `base64` = 内容内联 |
 | `PARSEHUB_RELAY_HOST` | 否 | 无 | 中转服务对外地址，留空自动探测内网 IP（仅 `http` 模式） |
 | `PARSEHUB_RELAY_PORT` | 否 | `21473` | 中转服务端口（仅 `http` 模式） |
@@ -124,7 +124,8 @@ plugins = ["nonebot_plugin_parsehub"]
 - 发链接、分享文案或裸 BV 号即自动解析，一条消息最多 3 个链接；`/解析关` 后仅超管 / 群管能手动解析
 - 解析开关按会话（群 / 私聊），默认全开，只把改过的会话写进 `sessions.json`
 - 同作品跨会话共享缓存：命中直接发本地那份（含卡片）；`b23.tv` / 完整链接 / 裸 BV 算同一作品；
-  同会话 120 秒内重复静默，超过 24 小时重新解析（手动 `/解析` 吃缓存、不去重）
+  同会话 120 秒内重复不发内容，解析后才认出是同一作品的只补一个成功表情，超过 24 小时重新解析
+  （手动 `/解析` 吃缓存、不去重）
 - B 站链接带 `?p=N` 解析第 N P（默认 P1）；`bm` 认完整链接 / 短链 / 分享文案 / 裸 BV（不支持 AV 号）；
   `ym` 认 `youtube.com`（含 music / shorts）、`youtu.be`、单独 11 位视频 ID
 - `music.youtube.com` 自动按音乐处理：卡片标「音乐」，只下载音频并发 `record` 语音，不下载视频
@@ -134,7 +135,7 @@ plugins = ["nonebot_plugin_parsehub"]
 - 单个作品最多发 **20 项**，超出部分不发并附提示
 - 长正文平台（微博 / 酷安 / 知乎 / 贴吧 / 公众号等）：卡片后把正文和资源放进同一个合并转发块，不再单独补文字；卡片只放三行摘要
 - 视频消息段被协议端拒绝时自动改发群文件；投递三选一、互不兜底（`file` 同机 / `http` 跨机 / `base64` 内联）
-- 卡片封面三级兜底（`thumb_url` → 图片媒体 → 视频抽帧），渲染失败自动退回文字
+- 卡片封面兜底（`thumb_url` → 图片媒体 → 本地图片 / 视频抽帧），渲染失败自动退回文字
 
 ## 🛠️ 开发
 
