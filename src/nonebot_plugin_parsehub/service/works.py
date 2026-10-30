@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageEvent
 
-from .. import bilibili_live, errors, feedback, keys, media, platforms
+from .. import audio, bilibili_live, errors, feedback, keys, media, platforms
 from ..budget import Budget
 from ..cache import CacheEntry
 from ..delivery import Sender
@@ -43,6 +43,7 @@ class _Work:
     session: str
     pre_key: str
     manual: bool
+    music: bool = False  # YouTube Music：发卡片 + record，不走视频下载
     post_key: str = ""  # 解析结果链接的作品 key
     all_keys: tuple[str, ...] = ()  # pre_key 与 post_key 去重后的组合
     platform_id: str = ""  # 解析结果里的平台 id（拿不到时退回 platform）
@@ -221,6 +222,13 @@ async def _parse_work(
         )
 
     _fill_keys(work)
+    raw_url = str(getattr(work.parsed, "raw_url", "") or "")
+    work.music = platforms.is_youtube_music(
+        work.url
+    ) or platforms.is_youtube_music(raw_url)
+    if work.music:
+        # 卡片元信息据此显示「音乐」，而不是 ParseHub 默认的「视频」。
+        work.parsed.music = True
     logger.info(
         f"[parsehub] {work.display} 解析成功"
         f"（耗时 {time.monotonic() - started:.1f}s）: {url}"
@@ -266,7 +274,11 @@ async def _apply_limits(
     settings = app.settings
 
     # 视频太长就只给封面 + 一句提示，别为几百 MB 的长片付下载和发送的代价。
-    if settings.max_seconds and work.seconds > settings.max_seconds:
+    if (
+        not work.music
+        and settings.max_seconds
+        and work.seconds > settings.max_seconds
+    ):
         logger.info(
             f"[parsehub] 视频 {work.seconds}s 超过时长上限 "
             f"{settings.max_seconds}s，只发封面"
@@ -305,7 +317,7 @@ async def _apply_limits(
 
 async def _size_gate(app: App, work: _Work) -> Result | None:
     """单媒体时先探测体积，超上限就不下载；继续时返回 ``None``。"""
-    if len(work.refs) != 1:
+    if work.music or len(work.refs) != 1:
         return None
     oversized = await download.oversized_size(app, work.refs[0], work.proxy)
     if oversized:
@@ -326,15 +338,30 @@ async def _download_and_deliver(
     """卡片与下载并行、投递、写缓存。"""
     assert work.budget is not None
     # 两者互不依赖：让卡片渲染 + 上传的时间藏进（本来就慢的）下载里。
+    download_task = (
+        download.download_music(
+            app, work.url, work.proxy, work.cookie, work.budget
+        )
+        if work.music
+        else download.download_media(
+            app, work.url, work.proxy, work.cookie, work.budget, work.parsed
+        )
+    )
     info, (files, download_error) = await asyncio.gather(
         message.send_card_or_text(
             app, sender, event, work.parsed, [], work.proxy, allow_text=False
         ),
-        download.download_media(
-            app, work.url, work.proxy, work.cookie, work.budget, work.parsed
-        ),
+        download_task,
     )
     if files is None:
+        if work.music and isinstance(download_error, audio.AudioTooLarge):
+            return Result.fail(
+                Outcome.TOO_LARGE,
+                notice=feedback.audio_too_large_notice(
+                    app.settings.max_file_bytes
+                ),
+                keys=work.all_keys,
+            )
         return Result.fail(
             Outcome.DOWNLOAD_FAILED,
             notice=feedback.download_failed_notice(
