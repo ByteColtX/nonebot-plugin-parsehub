@@ -9,46 +9,17 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
 
 import pytest
 from fake import make_group_event
-from nonebot.adapters.onebot.v11 import Bot, Message
-
-
-class FakeBot(Bot):
-    """记录所有 API 调用的假 Bot。"""
-
-    def __init__(self) -> None:
-        super().__init__(adapter=MagicMock(), self_id="10000")
-        self.calls: list[tuple[str, dict]] = []
-
-    async def call_api(self, api: str, **kwargs):  # type: ignore[override]
-        self.calls.append((api, kwargs))
-        return {"status": "ok", "retcode": 0, "data": None}
-
-    @property
-    def sent_images(self) -> list[str]:
-        out = []
-        for api, kwargs in self.calls:
-            if api != "send_msg":
-                continue
-            message = kwargs.get("message")
-            if isinstance(message, Message):
-                out.extend(
-                    seg.data.get("file", "")
-                    for seg in message
-                    if seg.type == "image"
-                )
-        return out
-
+from fakes import FakeBot
 
 _LIVE_URL = "https://live.bilibili.com/22603245"
 _SHORT_URL = "https://b23.tv/o9LYdgy"
 
 
 def _info(**overrides):
-    from nonebot_plugin_parsehub.live import LiveInfo
+    from nonebot_plugin_parsehub.bilibili_live import LiveInfo
 
     fields = {
         "room_id": 22603245,

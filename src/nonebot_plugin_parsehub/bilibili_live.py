@@ -23,8 +23,8 @@ from urllib.parse import urlsplit
 import httpx
 from nonebot import logger
 
-_LIVE_HOST = "live.bilibili.com"
-_SHORT_HOSTS = ("b23.tv", "bili2233.cn")
+from .bilibili import LIVE_HOST, SHORT_HOSTS
+
 _ROOM_INFO_URL = "https://api.live.bilibili.com/room/v1/Room/get_info"
 _ANCHOR_URL = (
     "https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room"
@@ -67,7 +67,7 @@ def live_url(room_id: int) -> str:
     Returns:
         ``https://live.bilibili.com/<room_id>``。
     """
-    return f"https://{_LIVE_HOST}/{room_id}"
+    return f"https://{LIVE_HOST}/{room_id}"
 
 
 def is_live_url(url: str) -> bool:
@@ -81,7 +81,7 @@ def is_live_url(url: str) -> bool:
     """
     parsed = urlsplit(url or "")
     host = (parsed.hostname or "").lower()
-    if host != _LIVE_HOST:
+    if host != LIVE_HOST:
         return False
     return bool(_ROOM_PATH.match(parsed.path or ""))
 
@@ -97,7 +97,7 @@ def is_short_link(url: str) -> bool:
     """
     host = (urlsplit(url or "").hostname or "").lower()
     return any(
-        host == item or host.endswith("." + item) for item in _SHORT_HOSTS
+        host == item or host.endswith("." + item) for item in SHORT_HOSTS
     )
 
 

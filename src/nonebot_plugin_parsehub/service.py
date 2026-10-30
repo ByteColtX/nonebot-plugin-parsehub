@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, MessageEvent
 
-from . import audio, errors, feedback, keys, live, media, platforms
+from . import audio, bilibili_live as live, errors, feedback, keys, media, platforms
 from .budget import Budget
 from .cache import CacheEntry
 from .delivery import MediaReport, Sender
