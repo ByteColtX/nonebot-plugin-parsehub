@@ -103,6 +103,26 @@ def platform_of(result: Any) -> tuple[str, tuple[int, int, int], str]:
     return name, (150, 150, 150), "x"
 
 
+def title_text(result: Any) -> str:
+    """卡片标题；没有标题时用正文兜底。
+
+    微博的图文 / 视频经常只有正文没有标题，直接画 ``(无标题)`` 会把用户
+    真正想看的文字丢掉。
+
+    Args:
+        result: ParseHub 解析结果。
+
+    Returns:
+        标题、正文，或 ``(无标题)``。
+    """
+    title = str(getattr(result, "title", "") or "").strip()
+    if title:
+        return title
+    content = str(getattr(result, "content", "") or "")
+    content = content.replace("\u200b", "").strip()
+    return content or "(无标题)"
+
+
 def meta_line(result: Any, media_count: int, is_ms: bool) -> str:
     """拼装元信息行（类型 · 时长 · 媒体数）。
 
@@ -193,7 +213,7 @@ def render(
     meta_font = font_for(META_SIZE, 400)
     kicker_font = font_for(KICKER_SIZE, 600)
     title_lines = fit_title(
-        getattr(result, "title", "") or "(无标题)",
+        title_text(result),
         title_font,
         card_w - INSET * 2,
         3,
