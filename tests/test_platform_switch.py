@@ -57,11 +57,6 @@ def _wire(
 
     monkeypatch.setattr(
         instance.client,
-        "platform_id",
-        lambda url: asyncio.sleep(0, result=platform_id),
-    )
-    monkeypatch.setattr(
-        instance.client,
         "is_supported",
         lambda url: asyncio.sleep(0, result=True),
     )

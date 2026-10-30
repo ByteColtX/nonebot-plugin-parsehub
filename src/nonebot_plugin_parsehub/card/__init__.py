@@ -86,24 +86,34 @@ class CardRenderer:
             卡片图片路径；不可用时为 ``None``（调用方退回文字）。
         """
         try:
-            font = await asyncio.to_thread(fonts.ensure_font, self.cache_dir)
-            if font is None:
-                return None
-            # 彩色 emoji 字体：拿不到就算了，标题里的 emoji 会退回方块
-            await asyncio.to_thread(fonts.ensure_emoji_font, self.cache_dir)
-            # 回退字体（DejaVu / Noto Sans）：补主字体没有的符号
-            await asyncio.to_thread(fonts.ensure_fallback_fonts, self.cache_dir)
-            picture = await asyncio.to_thread(
-                cover.fetch_cover, result, files, proxy
+            return await asyncio.to_thread(
+                self._render_sync, result, files, task_dir, proxy
             )
-            if picture is None:
-                return None
-            target_dir = task_dir or self._new_task_dir()
-            out_path = target_dir / "card.jpg"
-            await asyncio.to_thread(layout.render, result, picture, out_path)
         except Exception as exc:  # 渲染失败不能让解析白做
             logger.warning(
                 f"[parsehub] 卡片渲染失败: {type(exc).__name__}: {exc}"
             )
             return None
+
+    def _render_sync(
+        self,
+        result: Any,
+        files: list[Path],
+        task_dir: Path | None,
+        proxy: str,
+    ) -> Path | None:
+        """一次线程里完成字体、封面与排版（``render`` 的阻塞部分）。"""
+        font = fonts.ensure_font(self.cache_dir)
+        if font is None:
+            return None
+        # 彩色 emoji 字体：拿不到就算了，标题里的 emoji 会退回方块
+        fonts.ensure_emoji_font(self.cache_dir)
+        # 回退字体（DejaVu / Noto Sans）：补主字体没有的符号
+        fonts.ensure_fallback_fonts(self.cache_dir)
+        picture = cover.fetch_cover(result, files, proxy)
+        if picture is None:
+            return None
+        target_dir = task_dir or self._new_task_dir()
+        out_path = target_dir / "card.jpg"
+        layout.render(result, picture, out_path)
         return out_path

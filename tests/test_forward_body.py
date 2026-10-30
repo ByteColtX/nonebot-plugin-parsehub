@@ -135,11 +135,6 @@ async def test_pipeline_card_then_body_forward(
     monkeypatch.setattr(instance.cards, "render", fake_render)
     monkeypatch.setattr(
         instance.client,
-        "platform_id",
-        lambda url: asyncio.sleep(0, result="coolapk"),
-    )
-    monkeypatch.setattr(
-        instance.client,
         "is_supported",
         lambda url: asyncio.sleep(0, result=True),
     )
