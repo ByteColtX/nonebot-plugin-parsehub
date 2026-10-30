@@ -100,6 +100,8 @@ plugins = ["nonebot_plugin_parsehub"]
 
 需要登录态的平台（X、Instagram、TikTok、豆瓣、微信视频号 等），cookie 优先从 ParseHub 自己的配置读取
 （`ph set cookie <平台>`），也可以用 `PARSEHUB_COOKIE` 兜底。
+微信视频号必须用腾讯元宝（`yuanbao.tencent.com`）的登录 Cookie：
+`ph set cookie weixin_channels`。
 
 ## 🎉 使用
 
