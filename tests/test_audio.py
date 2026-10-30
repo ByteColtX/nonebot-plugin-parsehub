@@ -6,6 +6,8 @@
 全部离线：B 站接口与 yt-dlp 子进程都换成假实现，只验证插件自身的行为。
 """
 
+import json
+import subprocess
 import time
 from pathlib import Path
 
@@ -70,13 +72,19 @@ def _patch_yt(monkeypatch, plugin, calls=None, **overrides) -> None:
     """把 yt-dlp 元信息与下载换成假实现。"""
     info = _yt_info(**overrides)
 
-    def fake_fetch(url, proxy="", cookie=""):
+    def fake_fetch(url, proxy="", cookie="", cookie_dir=None):
         if calls is not None:
             calls["fetch"] = calls.get("fetch", 0) + 1
         return info
 
     def fake_download(
-        url, dest_dir: Path, proxy="", timeout=0, max_bytes=0, cookie=""
+        url,
+        dest_dir: Path,
+        proxy="",
+        timeout=0,
+        max_bytes=0,
+        cookie="",
+        cookie_dir=None,
     ):
         if calls is not None:
             calls["download"] = calls.get("download", 0) + 1
@@ -204,6 +212,70 @@ def test_extract_youtube_none_for_other_links(audio):
     """别家平台的链接提不出来。"""
     assert audio.extract_youtube(_BILI_URL) is None
     assert audio.extract_youtube("今天天气不错") is None
+
+
+def test_youtube_audio_cookie_file_is_private_and_removed(
+    plugin, monkeypatch, tmp_path
+):
+    """cookie 临时文件在 cache/tmp，目录 0700、文件 0600，跑完删除。"""
+    cookie_dir = tmp_path / "cache" / "tmp"
+    seen: list[Path] = []
+
+    def fake_run(args, **kwargs):
+        index = args.index("--cookies")
+        path = Path(args[index + 1])
+        seen.append(path)
+        assert path.parent == cookie_dir
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert "SID\tsecret" in path.read_text(encoding="utf-8")
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps(
+                {
+                    "id": "x",
+                    "title": "t",
+                    "duration": 1,
+                    "webpage_url": "https://youtu.be/x",
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(plugin.audio.subprocess, "run", fake_run)
+    info = plugin.audio.youtube_audio(
+        "https://youtu.be/x", cookie="SID=secret", cookie_dir=cookie_dir
+    )
+    assert info.video_id == "x"
+    assert seen and not seen[0].exists()
+    assert cookie_dir.stat().st_mode & 0o777 == 0o700
+
+
+def test_youtube_audio_cookie_file_removed_on_timeout(
+    plugin, monkeypatch, tmp_path
+):
+    """yt-dlp 超时也要删除 cookie 临时文件。"""
+    cookie_dir = tmp_path / "cache" / "tmp"
+    seen: list[Path] = []
+
+    def fake_run(args, **kwargs):
+        index = args.index("--cookies")
+        path = Path(args[index + 1])
+        seen.append(path)
+        raise subprocess.TimeoutExpired(args, 1)
+
+    monkeypatch.setattr(plugin.audio.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="超时"):
+        plugin.audio.youtube_audio(
+            "https://youtu.be/x", cookie="SID=secret", cookie_dir=cookie_dir
+        )
+    assert seen and not seen[0].exists()
+
+
+def test_youtube_audio_cookie_requires_dir(plugin):
+    """带 cookie 时必须给 cookie_dir，不能悄悄落回系统临时目录。"""
+    with pytest.raises(ValueError, match="cookie_dir"):
+        plugin.audio.youtube_audio("https://youtu.be/x", cookie="SID=secret")
 
 
 # --------------------------------------------------------------------------- #
@@ -555,7 +627,13 @@ async def test_handle_audio_too_large_during_download(
     """下载中发现超限（yt-dlp --max-filesize 语义）：同样拦下。"""
 
     def fake_download(
-        url, dest_dir: Path, proxy="", timeout=0, max_bytes=0, cookie=""
+        url,
+        dest_dir: Path,
+        proxy="",
+        timeout=0,
+        max_bytes=0,
+        cookie="",
+        cookie_dir=None,
     ):
         raise plugin.audio.AudioTooLarge()
 
@@ -653,7 +731,7 @@ async def test_handle_audio_live_youtube_rejected(
 ):
     """直播 / 预告不给提取音频，提示原因。"""
 
-    def fake_fetch(url, proxy="", cookie=""):
+    def fake_fetch(url, proxy="", cookie="", cookie_dir=None):
         raise RuntimeError("不支持直播")
 
     monkeypatch.setattr(plugin.audio, "youtube_audio", fake_fetch)
@@ -689,6 +767,42 @@ async def test_handle_audio_ym_sends_record(
 
 
 @pytest.mark.asyncio
+async def test_handle_audio_cookie_dir_under_cache(
+    plugin, monkeypatch, instance, service
+):
+    """YouTube 取数与下载都用插件的 cache/tmp。"""
+    seen: list[Path | None] = []
+
+    def fake_fetch(url, proxy="", cookie="", cookie_dir=None):
+        seen.append(cookie_dir)
+        return _yt_info()
+
+    def fake_download(
+        url,
+        dest_dir: Path,
+        proxy="",
+        timeout=0,
+        max_bytes=0,
+        cookie="",
+        cookie_dir=None,
+    ):
+        seen.append(cookie_dir)
+        out = dest_dir / "ylLOn6KXzAc.m4a"
+        out.write_bytes(b"\x00\x00\x00 ftypiso5" + b"a" * 1024)
+        return out
+
+    monkeypatch.setattr(plugin.audio, "youtube_audio", fake_fetch)
+    monkeypatch.setattr(plugin.audio, "download_youtube", fake_download)
+
+    bot = FakeBot()
+    await service.handle_audio(
+        instance, bot, make_group_event(f"ym {_YT_URL}"), _YT_URL, "youtube"
+    )
+    expected = instance.cache.root.parent / "tmp"
+    assert seen == [expected, expected]
+
+
+@pytest.mark.asyncio
 async def test_handle_audio_ym_webm_fallback_sends_record(
     plugin, monkeypatch, instance, service
 ):
@@ -696,7 +810,13 @@ async def test_handle_audio_ym_webm_fallback_sends_record(
     _patch_yt(monkeypatch, plugin)
 
     def fake_download(
-        url, dest_dir: Path, proxy="", timeout=0, max_bytes=0, cookie=""
+        url,
+        dest_dir: Path,
+        proxy="",
+        timeout=0,
+        max_bytes=0,
+        cookie="",
+        cookie_dir=None,
     ):
         out = dest_dir / "ylLOn6KXzAc.webm"
         out.write_bytes(b"\x1aE\xdf\xa3" + b"a" * 1024)
