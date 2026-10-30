@@ -15,11 +15,35 @@ from __future__ import annotations
 
 import asyncio
 import tomllib
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 # 多文件并发下载数（parsehub 2.3.10 起支持）。下载以网络等待为主，并发比串行快
 # 很多；但内存只有 1G 上下的机器别开太大。
 DOWNLOAD_CONCURRENCY = 8
+
+# parsehub 2.3.15 的微博 GIF 解析把 AniRef.ext 固定成 "gif"，但 media_url
+# 实际是 gif_mp4 的 .mp4；下载后按 .gif 调 PIL 会抛 UnidentifiedImageError。
+# 只按 URL 后缀纠正，不猜没有后缀的链接。
+_ANIMATED_VIDEO_SUFFIXES = frozenset({"mp4", "m4v", "mov", "webm"})
+
+
+def _normalise_animated_ext(result: Any) -> None:
+    """把「动图」引用里实际是视频的扩展名改对。
+
+    Args:
+        result: ParseHub 的解析结果。
+    """
+    media = getattr(result, "media", None)
+    items = media if isinstance(media, (list, tuple)) else [media]
+    for item in items:
+        if not item or str(getattr(item, "ext", "")).lower() != "gif":
+            continue
+        suffix = Path(urlsplit(str(getattr(item, "url", "") or "")).path).suffix
+        suffix = suffix.lower().lstrip(".")
+        if suffix in _ANIMATED_VIDEO_SUFFIXES:
+            item.ext = suffix
 
 
 def platform_cookie(platform: str, fallback: str) -> str:
@@ -146,12 +170,14 @@ class ParseHubClient:
             Exception: ParseHub 抛出的解析异常，由调用方决定如何提示用户。
         """
         hub = await self.hub()
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             hub.parse_sync,
             url,
             proxy=proxy or None,
             cookie=cookie or None,
         )
+        _normalise_animated_ext(result)
+        return result
 
     async def download(
         self,
@@ -176,16 +202,8 @@ class ParseHubClient:
         Raises:
             Exception: 下载失败时由 ParseHub 抛出的异常。
         """
-        hub = await self.hub()
-        return await asyncio.to_thread(
-            hub.download_sync,
-            url,
-            path,
-            proxy=proxy or None,
-            parse_proxy=proxy or None,
-            parse_cookie=cookie or None,
-            concurrency=concurrency,
-        )
+        result = await self.parse(url, proxy, cookie)
+        return await self.download_parsed(result, path, proxy, concurrency)
 
     async def download_parsed(
         self,
@@ -215,6 +233,7 @@ class ParseHubClient:
         Raises:
             Exception: 下载失败时由 ParseHub 抛出的异常。
         """
+        _normalise_animated_ext(result)
         return await asyncio.to_thread(
             result.download_sync,
             path,
