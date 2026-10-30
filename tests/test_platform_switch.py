@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from fake import make_group_event
-from test_plugin import (
+from fakes import (
     FakeBot,
     FakeDownloadResult,
     FakeMediaRef,
@@ -20,15 +20,6 @@ from test_plugin import (
 BILI = "https://b23.tv/abcd"
 DOUYIN = "https://v.douyin.com/abcdef/"
 XHS = "https://xhslink.cn/o/7mQiQjVqUtO"
-
-
-@pytest.fixture()
-def tmp_media(tmp_path, monkeypatch, plugin, instance):
-    """中转根目录指到临时目录。"""
-    monkeypatch.setattr(instance.relay, "root", tmp_path)
-    monkeypatch.setattr(instance.endpoint, "host", "127.0.0.1")
-    monkeypatch.setattr(instance.endpoint, "port", 18899)
-    return tmp_path
 
 
 def _wire(
@@ -82,7 +73,7 @@ def _wire(
         lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
     )
     monkeypatch.setattr(
-        card, "fetch_cover", lambda result, files, proxy="": b"cover"
+        card.cover, "fetch_cover", lambda result, files, proxy="": b"cover"
     )
     monkeypatch.setattr(card.layout, "render", fake_render)
     return calls

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from fake import make_group_event
-from test_plugin import (
+from fakes import (
     FakeBot,
     FakeDownloadResult,
     FakeMediaRef,
@@ -18,15 +18,6 @@ from test_plugin import (
 )
 
 URL = "https://b23.tv/abcd"
-
-
-@pytest.fixture()
-def tmp_media(tmp_path, monkeypatch, plugin, instance):
-    """中转根目录指到临时目录，避免真写到仓库里。"""
-    monkeypatch.setattr(instance.relay, "root", tmp_path)
-    monkeypatch.setattr(instance.endpoint, "host", "127.0.0.1")
-    monkeypatch.setattr(instance.endpoint, "port", 18899)
-    return tmp_path
 
 
 def _wire(
