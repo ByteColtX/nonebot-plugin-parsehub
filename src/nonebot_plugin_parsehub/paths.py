@@ -47,10 +47,13 @@ def data_root() -> Path:
     return store.get_plugin_data_dir()
 
 
-def relay_root() -> Path:
+def relay_root(cache_dir: Path | None = None) -> Path:
     """中转服务根目录（只放待投递的任务目录）。
+
+    Args:
+        cache_dir: 缓存根目录；``None`` 时走 localstore 的默认。
 
     Returns:
         缓存根目录下的 ``relay``。
     """
-    return cache_root() / RELAY_DIR_NAME
+    return (cache_dir or cache_root()) / RELAY_DIR_NAME
