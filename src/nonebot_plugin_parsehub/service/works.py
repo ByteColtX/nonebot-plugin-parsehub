@@ -411,10 +411,11 @@ async def _deliver_cached(
     settings = app.settings
     await asyncio.to_thread(app.cache.remember_key, entry.root, key)
 
-    card_sent = False
     if settings.card_enabled and entry.card is not None:
-        card_sent = await app.delivery.send_card(sender, event, entry.card)
-    if not card_sent and settings.send_text and entry.caption:
+        await app.delivery.send_card(sender, event, entry.card)
+    # caption 只会在「没出卡」或「无标题正文帖」时写入；两种都要发。卡片
+    # 成功时正文帖补的文字不会被这里吞掉。
+    if settings.send_text and entry.caption:
         await app.delivery.send_text(sender, event, entry.caption)
 
     files = [

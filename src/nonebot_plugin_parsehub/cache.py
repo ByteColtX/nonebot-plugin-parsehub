@@ -61,7 +61,7 @@ class CacheEntry:
         root: 条目目录。
         files: 媒体文件（按文件名排序）。
         card: 卡片图路径；没有时为 None。
-        caption: 没出卡时发过的文字。
+        caption: 没出卡时发过的文字，或正文帖在卡片后补发的正文。
         seconds: 媒体时长（秒），0 表示未知。
         keys: 条目对应的所有作品 key。
     """
@@ -238,7 +238,7 @@ class MediaCache:
             keys: 作品 key，通常同时传「短链 key」和「解析后的 key」。
             files: 已下载到本地的媒体文件。
             card: 卡片图路径，没有就传 ``None``。
-            caption: 没出卡时发的文字。
+            caption: 没出卡时发的文字，或正文帖在卡片后补发的正文。
             seconds: 媒体的时长（秒），0 表示未知。
 
         Returns:
