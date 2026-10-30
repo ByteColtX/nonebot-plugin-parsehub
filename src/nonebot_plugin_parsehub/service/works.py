@@ -7,8 +7,8 @@
 就地终结，要么把阶段产物填进 :class:`_Work` 交给下一阶段；媒体获取与
 「卡片或文字」的发送在 :mod:`message`，下载在 :mod:`download`。顺序：直播间
 封面卡片 → 缓存命中
-→ 支持性 / 预算 / 解析 / 二次去重 → 时长上限 / 无媒体 / 截断 → 单媒体
-体积预检 → 卡片与下载并行，投递，写缓存。
+→ 支持性 / 预算 / 解析 / 二次去重 → 时长上限（上游没给时长时先探测）/
+无媒体 / 截断 → 单媒体体积预检 → 卡片与下载并行，投递，写缓存。
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from ..cache import CacheEntry
 from ..delivery import Sender
 from ..media import MAX_MEDIA_ITEMS, MediaFile, MediaRef
 from ..parsehub_client import platform_cookie
-from . import download, message
+from . import download, duration, message
 from .result import Outcome, Result
 
 if TYPE_CHECKING:
@@ -160,6 +160,15 @@ async def _hit_cache(app: App, key: str) -> CacheEntry | None:
     limit = app.settings.max_seconds
     if limit and entry.seconds > limit:
         return None
+    if (
+        limit
+        and entry.seconds <= 0
+        and any(
+            media.kind_of(path) is media.MediaKind.VIDEO for path in entry.files
+        )
+    ):
+        # 旧条目可能是在能探测时长之前写下的；缓存里没有直链，无法补探。
+        logger.warning("[parsehub] 缓存里的视频时长未知，本次时长上限不生效")
     return entry
 
 
@@ -264,6 +273,48 @@ def _fill_keys(work: _Work) -> None:
     work.display = platforms.display_name(work.platform_id)
 
 
+async def _probe_seconds(
+    work: _Work,
+    refs: list[MediaRef],
+    limit: int,
+) -> int:
+    """解析结果没给时长时，在下载前从视频容器头探测。
+
+    多个视频共用一段探测预算：任意一个超过上限就提前停止，否则逐个探测取
+    最长值。预算用完或探测失败按未知处理（返回 0）。
+
+    Args:
+        work: 当前作品（提供预算与代理）。
+        refs: 需要探测的视频引用。
+        limit: 时长上限（秒），用于提前停止。
+
+    Returns:
+        探测到的最长时长（秒）；都没探测到返回 0。
+    """
+    if work.budget is None:
+        return 0
+    deadline = time.monotonic() + min(
+        duration.PROBE_TIMEOUT_SECONDS, work.budget.remaining
+    )
+    longest = 0
+    for ref in refs:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        seconds = await asyncio.to_thread(
+            duration.probe,
+            ref.source_url,
+            timeout=remaining,
+            proxy=work.proxy,
+        )
+        longest = max(longest, seconds)
+        if longest > limit:
+            break
+    if longest:
+        logger.info(f"[parsehub] 解析结果没给时长，探测到 {longest}s")
+    return longest
+
+
 async def _apply_limits(
     app: App,
     sender: Sender,
@@ -272,6 +323,23 @@ async def _apply_limits(
 ) -> Result | None:
     """时长上限、缓存二次命中、无媒体与数量截断；继续时返回 ``None``。"""
     settings = app.settings
+
+    # 上游没给 duration（视频号必现，其它平台偶发）时先把时长补出来，否则
+    # 上限永远不触发。只探视频引用，图片帖不会多花这次请求。
+    video_refs = [ref for ref in work.refs if media.is_video_ref(ref)]
+    if (
+        not work.music
+        and settings.max_seconds
+        and work.seconds <= 0
+        and video_refs
+    ):
+        work.seconds = await _probe_seconds(
+            work, video_refs, settings.max_seconds
+        )
+        if not work.seconds:
+            logger.warning(
+                f"[parsehub] {work.display} 视频时长未知，本次时长上限不生效"
+            )
 
     # 视频太长就只给封面 + 一句提示，别为几百 MB 的长片付下载和发送的代价。
     if (

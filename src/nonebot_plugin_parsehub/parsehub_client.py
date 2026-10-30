@@ -354,6 +354,23 @@ class ParseHubClient:
         )
 
 
+def ffmpeg_exe() -> str | None:
+    """找可用的 ffmpeg：系统装的优先，其次 ``imageio-ffmpeg`` 自带的。
+
+    Returns:
+        可执行文件路径；都没有时返回 ``None``。
+    """
+    system = shutil.which("ffmpeg")
+    if system:
+        return system
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # 没装 bundle / 平台不支持
+        return None
+
+
 def _ensure_ffmpeg_available() -> str | None:
     """确保 yt-dlp 能找到 ffmpeg，否则音视频不会合并。
 
@@ -368,12 +385,9 @@ def _ensure_ffmpeg_available() -> str | None:
     system = shutil.which("ffmpeg")
     if system:
         return system
-    try:
-        import imageio_ffmpeg
-
-        exe = imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception as exc:  # 没装 bundle / 平台不支持时保持原行为
-        logger.warning(f"[parsehub] 找不到 ffmpeg，音视频可能无法合并: {exc}")
+    exe = ffmpeg_exe()
+    if exe is None:
+        logger.warning("[parsehub] 找不到 ffmpeg，音视频可能无法合并")
         return None
 
     try:
