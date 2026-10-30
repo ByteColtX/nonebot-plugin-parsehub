@@ -43,8 +43,8 @@ CARD_NAME = "card.jpg"
 META_NAME = "meta.json"
 TMP_DIR_NAME = ".tmp"
 
-# meta.json 的格式版本。
-META_SCHEMA = 1
+# meta.json 的格式版本。2：正文帖卡片后补发正文，旧卡片需要重新渲染。
+META_SCHEMA = 2
 
 # 条目目录名的哈希长度（十六进制字符数）。
 _HASH_LENGTH = 20
@@ -187,6 +187,13 @@ class MediaCache:
             return None
         meta = self._read_meta(path)
         if meta is None:
+            return None
+        # 旧版卡片可能没有正文；直接当未命中，让这次重新解析 / 渲染。
+        try:
+            schema = int(meta.get("schema") or 0)
+        except (TypeError, ValueError):
+            return None
+        if schema != META_SCHEMA:
             return None
         if time.time() - float(meta.get("updated_at") or 0) > self.ttl_seconds:
             return None

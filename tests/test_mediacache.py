@@ -68,6 +68,19 @@ def test_store_then_get(tmp_path: Path, cache, card) -> None:
     assert hit.keys == ("bilibili:bv1",)
 
 
+def test_old_schema_is_treated_as_miss(tmp_path: Path, cache) -> None:
+    """旧版卡片可能没有正文，schema 不匹配就当未命中重新解析。"""
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
+    entry = store.store(["k"], _files(tmp_path, "a.jpg"))
+    assert entry is not None
+    assert _meta(entry)["schema"] == cache.META_SCHEMA
+
+    meta = _meta(entry)
+    meta["schema"] = cache.META_SCHEMA - 1
+    (entry / "meta.json").write_text(json.dumps(meta), "utf-8")
+    assert store.get("k") is None
+
+
 def test_get_missing_key(tmp_path: Path, cache) -> None:
     """没缓存过的 key 返回 None。"""
     store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
