@@ -51,7 +51,7 @@ src/nonebot_plugin_parsehub/
 ├── relay.py            # 只读中转服务（只服务 relay/）
 ├── parsehub_client.py  # ParseHub 懒加载 + 线程池封装
 ├── platforms.py        # 平台元数据（展示名 / 颜色 / logo / 时长单位）
-├── keys.py             # 链接识别与作品 key 归一
+├── keys.py             # 链接识别 / 域名→平台 / 作品 key 归一
 ├── switches.py         # 按会话的解析开关
 ├── media.py            # parsehub 结果 → MediaRef / MediaFile
 ├── errors.py           # 异常分类与用户文案
@@ -68,7 +68,10 @@ src/nonebot_plugin_parsehub/
 - **发送只有一个出口**：除 `delivery` 外不允许出现 `bot.send` / `call_api` 发送消息；
   `service` 不接触 `Bot`，只依赖 `Sender` 协议。
 - **结局穷举**：`service.handle` 一定返回 `Result`；提示放在 `Result.notice`，由
-  `handle` 统一发送，终态表情在提示之后（重复除外，重复是静默的）。
+  `handle` 统一发送。START 表情是后台任务，收尾前 join，保证终态表情排在它后面；
+  解析前就命中去重的重复不点表情，解析后才发现重复的点成功表情。
+- **同消息多链接并发**：`triggers` 对一条消息里的链接 `gather` 扇出；整条流水线的
+  并发上限仍由 `App.semaphore`（`PARSEHUB_CONCURRENCY`）兜底。
 - **去重三态**：`claim`（进入时，含处理中集合）→ 成功 `commit` → 失败 `release`。
   手动命令不参与去重拦截，也不记入窗口。
 - **缓存只收发出去的东西**：体积超限被跳过的媒体不写缓存；缓存条目按作品跨会话共享。
