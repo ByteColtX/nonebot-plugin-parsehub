@@ -393,6 +393,13 @@ def test_cache_key_youtube_keeps_id_case(audio):
     assert lower != upper
 
 
+def test_cache_key_youtube_shorts_keeps_id_case(audio):
+    """shorts 等 fallback 形态也要保留 ID 大小写。"""
+    lower = audio.cache_key("https://www.youtube.com/shorts/aqz-KE-bpKQ")
+    upper = audio.cache_key("https://www.youtube.com/shorts/AQZ-KE-BPKQ")
+    assert lower != upper
+
+
 def test_music_youtube_shape_now_allowed(keys):
     """music.youtube.com 也是 YouTube，链接识别不再漏掉它。"""
     assert keys.extract_urls(
