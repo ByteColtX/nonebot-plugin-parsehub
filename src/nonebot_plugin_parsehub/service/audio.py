@@ -139,6 +139,15 @@ _SOURCES: dict[str, AudioSource] = {
 }
 
 
+def _audio_file(path: Path) -> media.MediaFile:
+    """音频链路的文件固定按 record 投递。
+
+    yt-dlp 在无 m4a 时可能落音频-only 的 ``.webm``，按扩展名会被判成
+    video；音频链路已知是音频，不参与扩展名推断。
+    """
+    return media.MediaFile(path=path, kind=media.MediaKind.RECORD)
+
+
 async def deliver_audio(
     app: App,
     sender: Sender,
@@ -209,7 +218,7 @@ async def deliver_audio(
         return downloaded
     path = downloaded
 
-    file = media.MediaFile(path=path, kind=media.kind_of(path), duration=0)
+    file = _audio_file(path)
     report = await _send_audio(app, sender, event, file, as_file)
     # 只缓存真正发出去的音频
     if report.ok:
@@ -369,10 +378,7 @@ async def _deliver_cached_audio(
         本次处理的结局。
     """
     await asyncio.to_thread(app.cache.remember_key, entry.root, key)
-    files = [
-        media.MediaFile(path=path, kind=media.kind_of(path))
-        for path in entry.files
-    ]
+    files = [_audio_file(path) for path in entry.files]
     if not files:
         return Result.fail(Outcome.NO_MEDIA, keys=(key,))
     report = await _send_audio(app, sender, event, files[0], as_file)

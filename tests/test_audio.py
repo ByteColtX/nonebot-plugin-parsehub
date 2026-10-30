@@ -689,6 +689,39 @@ async def test_handle_audio_ym_sends_record(
 
 
 @pytest.mark.asyncio
+async def test_handle_audio_ym_webm_fallback_sends_record(
+    plugin, monkeypatch, instance, service
+):
+    """无 m4a 时 yt-dlp 可能落音频-only 的 .webm，仍要按语音发。"""
+    _patch_yt(monkeypatch, plugin)
+
+    def fake_download(
+        url, dest_dir: Path, proxy="", timeout=0, max_bytes=0, cookie=""
+    ):
+        out = dest_dir / "ylLOn6KXzAc.webm"
+        out.write_bytes(b"\x1aE\xdf\xa3" + b"a" * 1024)
+        return out
+
+    monkeypatch.setattr(plugin.audio, "download_youtube", fake_download)
+
+    first = FakeBot()
+    result = await service.handle_audio(
+        instance, first, make_group_event(f"ym {_YT_URL}"), _YT_URL, "youtube"
+    )
+    assert result.outcome is service.Outcome.DELIVERED
+    assert first.sent_records and first.sent_records[0].endswith(".webm")
+    assert first.sent_videos == []
+
+    second = FakeBot()
+    result = await service.handle_audio(
+        instance, second, make_group_event(f"ym {_YT_URL}"), _YT_URL, "youtube"
+    )
+    assert result.outcome is service.Outcome.FROM_CACHE
+    assert second.sent_records and second.sent_records[0].endswith(".webm")
+    assert second.sent_videos == []
+
+
+@pytest.mark.asyncio
 async def test_handle_audio_ym_file_option(
     plugin, monkeypatch, instance, service
 ):
