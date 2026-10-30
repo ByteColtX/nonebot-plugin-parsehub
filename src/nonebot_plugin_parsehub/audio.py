@@ -17,11 +17,12 @@ ParseHub 不提供「只要音频」的解析，这里自己调两条链路：
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
@@ -475,67 +476,103 @@ def _yt_error(proc: subprocess.CompletedProcess) -> str:
     return f"yt-dlp: {tail[-_YT_ERROR_CHARS:]}"
 
 
-def _cookie_args(cookie: str) -> list[str]:
-    """把 cookie 字符串变成 yt-dlp 的 ``--cookies`` 参数。
+@contextmanager
+def _cookie_file(cookie: str, cookie_dir: Path | None) -> Iterator[list[str]]:
+    """把 cookie 写成 yt-dlp 的 Netscape 文件，用完即删。
 
     yt-dlp 只认 Netscape 格式的 cookie 文件；这里把 ``k=v; k2=v2`` 写进
-    临时文件。空 cookie 返回空参数表。
+    插件缓存目录下的一次性文件（目录 0700、文件 0600）。空 cookie 返回
+    空参数表。
 
     Args:
         cookie: cookie 字符串（优先来自 ParseHub 的 ``cookies.toml``）。
+        cookie_dir: 一次性文件目录；带 cookie 时必填。
 
-    Returns:
+    Yields:
         追加到命令行的参数。
+
+    Raises:
+        ValueError: 带 cookie 却没有提供 ``cookie_dir``。
     """
-    if not cookie.strip():
-        return []
-    domain = ".youtube.com"
-    lines = ["# Netscape HTTP Cookie File"]
-    for pair in cookie.split(";"):
-        if "=" not in pair:
-            continue
-        name, _, value = pair.strip().partition("=")
-        if name:
-            lines.append(
-                f"{domain}\tTRUE\t/\tFALSE\t0\t{name}\t{value.strip()}"
-            )
-    if len(lines) == 1:
-        return []
-    path = Path(tempfile.gettempdir()) / f"parsehub-yt-{os.getpid()}.cookies"
+    args: list[str] = []
+    path: Path | None = None
+    if cookie.strip():
+        if cookie_dir is None:
+            raise ValueError("cookie_dir is required when cookie is set")
+        domain = ".youtube.com"
+        lines = ["# Netscape HTTP Cookie File"]
+        for pair in cookie.split(";"):
+            if "=" not in pair:
+                continue
+            name, _, value = pair.strip().partition("=")
+            if name:
+                lines.append(
+                    f"{domain}\tTRUE\t/\tFALSE\t0\t{name}\t{value.strip()}"
+                )
+        if len(lines) > 1:
+            try:
+                cookie_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+                try:
+                    cookie_dir.chmod(0o700)
+                except OSError:
+                    pass
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    newline="\n",
+                    prefix="parsehub-yt-",
+                    suffix=".cookies",
+                    dir=cookie_dir,
+                    delete=False,
+                ) as file:
+                    path = Path(file.name)
+                    file.write("\n".join(lines) + "\n")
+                args = ["--cookies", str(path)]
+            except OSError:
+                if path is not None:
+                    path.unlink(missing_ok=True)
+                args = []
     try:
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    except OSError:
-        return []
-    return ["--cookies", str(path)]
+        yield args
+    finally:
+        if path is not None:
+            path.unlink(missing_ok=True)
 
 
-def youtube_audio(url: str, proxy: str = "", cookie: str = "") -> YtAudio:
+def youtube_audio(
+    url: str,
+    proxy: str = "",
+    cookie: str = "",
+    cookie_dir: Path | None = None,
+) -> YtAudio:
     """用 yt-dlp 拿一个 YouTube 视频的元信息（不下载）。
 
     Args:
         url: 视频链接。
         proxy: 代理；空串表示直连。
         cookie: 登录态 cookie（规避 bot 检测）；空串表示不带。
+        cookie_dir: 一次性 cookie 文件目录；带 cookie 时必填。
 
     Returns:
         视频元信息。
 
     Raises:
+        ValueError: 带 cookie 但没有提供 ``cookie_dir``。
         RuntimeError: 解析失败、直播 / 预告、超时。
     """
     args = [*_yt_dlp_cmd(), "-J", "--no-playlist", "--no-warnings"]
     if proxy:
         args += ["--proxy", proxy]
-    args += _cookie_args(cookie)
-    try:
-        proc = subprocess.run(
-            args + [url],
-            capture_output=True,
-            text=True,
-            timeout=_YT_PARSE_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("解析视频信息超时") from exc
+    with _cookie_file(cookie, cookie_dir) as cookie_args:
+        try:
+            proc = subprocess.run(
+                args + cookie_args + [url],
+                capture_output=True,
+                text=True,
+                timeout=_YT_PARSE_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("解析视频信息超时") from exc
     if proc.returncode != 0:
         raise RuntimeError(_yt_error(proc))
     try:
@@ -571,6 +608,7 @@ def download_youtube(
     timeout: float = 0,
     max_bytes: int = 0,
     cookie: str = "",
+    cookie_dir: Path | None = None,
 ) -> Path:
     """用 yt-dlp 下载最佳音频流。
 
@@ -584,12 +622,14 @@ def download_youtube(
         timeout: 子进程超时（秒），0 表示不限。
         max_bytes: 体积上限（字节），0 表示不限。
         cookie: 登录态 cookie；空串表示不带。
+        cookie_dir: 一次性 cookie 文件目录；带 cookie 时必填。
 
     Returns:
         下载好的文件路径。
 
     Raises:
         AudioTooLarge: 超过体积上限。
+        ValueError: 带 cookie 但没有提供 ``cookie_dir``。
         RuntimeError: 下载失败或超时。
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -608,16 +648,16 @@ def download_youtube(
         args += ["--proxy", proxy]
     if max_bytes:
         args += ["--max-filesize", str(max_bytes)]
-    args += _cookie_args(cookie)
-    try:
-        proc = subprocess.run(
-            args + [url],
-            capture_output=True,
-            text=True,
-            timeout=timeout or None,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("音频下载超时") from exc
+    with _cookie_file(cookie, cookie_dir) as cookie_args:
+        try:
+            proc = subprocess.run(
+                args + cookie_args + [url],
+                capture_output=True,
+                text=True,
+                timeout=timeout or None,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("音频下载超时") from exc
     if proc.returncode != 0:
         raise RuntimeError(_yt_error(proc))
     files = (

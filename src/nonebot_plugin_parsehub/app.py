@@ -38,6 +38,7 @@ class App:
         settings: 归一化后的设置。
         client: ParseHub 客户端。
         cache: 作品级媒体缓存。
+        tmp_dir: 一次性临时目录（cookie 等短命文件）。
         dedupe: 会话级去重。
         switches: 按会话的解析开关。
         relay: 中转服务。
@@ -100,6 +101,11 @@ class App:
             endpoint=endpoint,
             semaphore=asyncio.Semaphore(settings.concurrency),
         )
+
+    @property
+    def tmp_dir(self) -> Path:
+        """一次性临时目录（cookie 等短命文件）。"""
+        return paths.tmp_root(self.cache.root.parent)
 
     async def startup(self) -> None:
         """启动钩子：按投递模式启动中转、应用字体、预热并开始清扫。

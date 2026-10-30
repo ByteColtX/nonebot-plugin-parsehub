@@ -33,13 +33,14 @@ if TYPE_CHECKING:
 # 两个平台的音频元信息。
 type AudioInfo = audio.BiliAudio | audio.YtAudio
 
-# 取数：async (target, proxy, cookie, budget) -> AudioInfo
-type _Fetch = Callable[[str, str, str, Budget], Awaitable[AudioInfo]]
+# 取数：async (target, proxy, cookie, cookie_dir, budget) -> AudioInfo
+type _Fetch = Callable[[str, str, str, Path, Budget], Awaitable[AudioInfo]]
 # 体积预估：(info) -> 字节数；None 表示这个平台估不出来
 type _Estimate = Callable[[AudioInfo], int] | None
-# 下载：async (info, task_dir, proxy, cookie, budget, max_bytes) -> 落盘路径
+# 下载：async (info, task_dir, proxy, cookie, cookie_dir, budget, max_bytes)
+# -> 落盘路径
 type _Download = Callable[
-    [AudioInfo, Path, str, str, Budget, int], Awaitable[Path]
+    [AudioInfo, Path, str, str, Path, Budget, int], Awaitable[Path]
 ]
 
 
@@ -59,7 +60,11 @@ class AudioSource:
 
 
 async def _fetch_bilibili(
-    target: str, proxy: str, cookie: str, budget: Budget
+    target: str,
+    proxy: str,
+    cookie: str,
+    _cookie_dir: Path,
+    budget: Budget,
 ) -> AudioInfo:
     """B 站 playurl 接口取音频元信息（吃操作预算）。"""
     async with budget.timeout():
@@ -71,6 +76,7 @@ async def _download_bilibili(
     task_dir: Path,
     proxy: str,
     cookie: str,
+    _cookie_dir: Path,
     budget: Budget,
     max_bytes: int,
 ) -> Path:
@@ -86,12 +92,16 @@ async def _download_bilibili(
 
 
 async def _fetch_youtube(
-    target: str, proxy: str, cookie: str, budget: Budget
+    target: str,
+    proxy: str,
+    cookie: str,
+    cookie_dir: Path,
+    budget: Budget,
 ) -> AudioInfo:
     """yt-dlp 取 YouTube 音频元信息（吃操作预算）。"""
     async with budget.timeout():
         return await asyncio.to_thread(
-            audio.youtube_audio, target, proxy, cookie
+            audio.youtube_audio, target, proxy, cookie, cookie_dir
         )
 
 
@@ -100,6 +110,7 @@ async def _download_youtube(
     task_dir: Path,
     proxy: str,
     cookie: str,
+    cookie_dir: Path,
     budget: Budget,
     max_bytes: int,
 ) -> Path:
@@ -113,6 +124,7 @@ async def _download_youtube(
             max(0.0, budget.remaining),
             max_bytes,
             cookie,
+            cookie_dir,
         )
     # 命名成清洗后的标题（yt-dlp 落盘的是 <id>.<ext>）
     stem = audio.file_stem(info.title, info.video_id)
@@ -184,10 +196,11 @@ async def deliver_audio(
     proxy = settings.proxy_for(platform)
     # cookies.toml 是同步磁盘读，放线程里
     cookie = await asyncio.to_thread(platform_cookie, platform, settings.cookie)
+    cookie_dir = app.tmp_dir
     budget = Budget(settings.timeout)
 
     try:
-        info = await source.fetch(target, proxy, cookie, budget)
+        info = await source.fetch(target, proxy, cookie, cookie_dir, budget)
     except Exception as exc:
         logger.warning(
             f"[parsehub] 音频元信息获取失败 {target}: "
@@ -212,7 +225,7 @@ async def deliver_audio(
         )
 
     downloaded = await _download_audio(
-        app, source, info, target, proxy, cookie, budget, key
+        app, source, info, target, proxy, cookie, cookie_dir, budget, key
     )
     if isinstance(downloaded, Result):
         return downloaded
@@ -235,6 +248,7 @@ async def _download_audio(
     target: str,
     proxy: str,
     cookie: str,
+    cookie_dir: Path,
     budget: Budget,
     key: str,
 ) -> Path | Result:
@@ -247,6 +261,7 @@ async def _download_audio(
         target: 目标链接（日志用）。
         proxy: 代理地址。
         cookie: 平台 cookie。
+        cookie_dir: 一次性 cookie 临时文件目录。
         budget: 操作预算。
         key: 音频缓存 key（失败结局要记去重窗口）。
 
@@ -257,7 +272,13 @@ async def _download_audio(
     task_dir = await asyncio.to_thread(app.relay.new_task_dir)
     try:
         path = await source.download(
-            info, task_dir, proxy, cookie, budget, settings.max_file_bytes
+            info,
+            task_dir,
+            proxy,
+            cookie,
+            cookie_dir,
+            budget,
+            settings.max_file_bytes,
         )
     except audio.AudioTooLarge:
         return Result.fail(
