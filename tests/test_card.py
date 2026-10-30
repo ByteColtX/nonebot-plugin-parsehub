@@ -97,6 +97,35 @@ def test_tiktok_duration_is_seconds(card) -> None:
     # 服务侧行为在 test_duration_limit.py 里经完整链路覆盖。
 
 
+def test_title_falls_back_to_content(card) -> None:
+    """微博经常只有正文：空标题不能让卡片只剩「(无标题)」。"""
+    assert card.layout.title_text(FakeResult(title="", content="正文内容")) == (
+        "正文内容"
+    )
+    assert card.layout.title_text(FakeResult(title="标题", content="正文")) == (
+        "标题"
+    )
+    assert (
+        card.layout.title_text(FakeResult(title="", content="")) == "(无标题)"
+    )
+
+
+def test_render_uses_content_when_title_missing(
+    tmp_path: Path, card, monkeypatch
+) -> None:
+    """渲染时也要走正文兜底，而不是只在 helper 里。"""
+    drawn: list[str] = []
+    monkeypatch.setattr(
+        card.layout,
+        "draw_text",
+        lambda *args, **kwargs: drawn.append(args[2]),
+    )
+    result = FakeResult(title="", content="微博正文")
+    out = tmp_path / "weibo.jpg"
+    assert card.layout.render(result, _cover_bytes(540, 960), out) is True
+    assert "微博正文" in drawn
+
+
 def test_meta_line_image_with_count(card) -> None:
     """图文帖：类型 · 媒体数，没有时长。"""
     result = FakeResult(
