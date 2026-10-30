@@ -232,6 +232,22 @@ _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     ("xiaoheihe", re.compile(r"[?&]link_id=([0-9A-Za-z]+)")),
     ("xiaoheihe", re.compile(r"/bbs/link/([0-9A-Za-z]+)")),
+    # 豆瓣：普通话题链接，以及 doubanapp 里被 URL 编码的 uri 参数
+    (
+        "douban",
+        re.compile(
+            r"douban\.com/(?:group/)?topic/(\d+)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "douban",
+        re.compile(
+            r"douban\.com/doubanapp/dispatch\?[^#]*?uri="
+            r"(?:%2f|/)(?:group(?:%2f|/))?topic(?:%2f|/)(\d+)",
+            re.IGNORECASE,
+        ),
+    ),
     ("xiaohongshu", re.compile(r"/(?:explore|discovery/item)/([0-9A-Za-z]+)")),
     ("weibo", re.compile(r"/(?:detail|status)/([0-9A-Za-z]+)")),
     ("youtube", re.compile(r"youtu\.be/([0-9A-Za-z_-]{11})")),
