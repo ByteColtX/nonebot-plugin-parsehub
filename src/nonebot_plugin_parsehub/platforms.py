@@ -43,11 +43,37 @@ PLATFORMS: dict[str, tuple[str, tuple[int, int, int], str]] = {
     "tiktok": ("TikTok", (255, 255, 255), "tiktok"),
     "threads": ("Threads", (255, 255, 255), "threads"),
     "facebook": ("Facebook", (8, 102, 255), "facebook"),
-    "snapchat": ("Snapchat", (255, 252, 0), "snapchat"),
-    "medium": ("Medium", (255, 255, 255), "medium"),
     "douban": ("豆瓣", (45, 150, 61), "douban"),
-    "bangumi": ("Bangumi", (245, 145, 180), "bilibili"),
 }
+
+# 插件支持的平台（parsehub 的 platform.id）。上游可能多加载了解析器，
+# 但链接识别、`/解析平台` 与代理默认值只认这份白名单：新平台要显式加进来，
+# 上游多出来的（bangumi / medium / snapchat）不会自动变成「支持」。
+SUPPORTED_PLATFORMS: frozenset[str] = frozenset(
+    {
+        "bilibili",
+        "coolapk",
+        "douban",
+        "douyin",
+        "facebook",
+        "instagram",
+        "kuaishou",
+        "pipix",
+        "threads",
+        "tieba",
+        "tiktok",
+        "toutiao",
+        "twitter",
+        "weibo",
+        "weixin",
+        "weixin_channels",
+        "xhs",
+        "xiaoheihe",
+        "youtube",
+        "zhihu",
+        "zuiyou",
+    }
+)
 
 # 平台白名单里允许写的别名（parsehub 的 id 是 xhs / weixin / twitter）。
 PLATFORM_ALIASES: dict[str, str] = {
@@ -70,8 +96,6 @@ OVERSEAS_PLATFORMS: tuple[str, ...] = (
     "youtube",
     "tiktok",
     "facebook",
-    "snapchat",
-    "medium",
 )
 
 # 视频过长提示里「去 xx 看吧」用的平台名：平台展示名不一定适合念出来。
@@ -87,12 +111,10 @@ WATCH_NAMES: dict[str, str] = {
 # 不列，避免每个视频都多一个转发块。富文本（richtext）无论平台都算长正文。
 LONG_BODY_PLATFORMS: frozenset[str] = frozenset(
     {
-        "bangumi",
         "coolapk",
         "douban",
         "facebook",
         "instagram",
-        "medium",
         "threads",
         "tieba",
         "toutiao",

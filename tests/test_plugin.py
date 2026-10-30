@@ -145,7 +145,10 @@ def test_extract_urls_ignores_removed_hosts(plugin, keys):
         "https://threads.net/abc "
         "https://zuiyou.com/abc "
         "https://pipix.com/abc "
-        "https://xiaochuankeji.cn/abc"
+        "https://xiaochuankeji.cn/abc "
+        "https://bgm.tv/subject/topic/123 "
+        "https://medium.com/@user/some-article-abcdef123456 "
+        "https://www.snapchat.com/@user/abc123"
     )
     assert keys.extract_urls(text) == []
 
@@ -161,7 +164,6 @@ def test_extract_urls_accepts_new_supported_shapes(plugin, keys):
     text = (
         "动态 https://t.bilibili.com/123456789012345678 "
         "专栏 https://www.bilibili.com/opus/123 "
-        "Bangumi https://chii.in/subject/topic/123 "
         "皮皮虾 https://h5.pipix.com/s/abc "
         "最右 https://share.xiaochuankeji.cn/hybrid/share/post?pid=123 "
         "最右短链 https://s.izuiyou.com/s/23BpI"
@@ -170,7 +172,6 @@ def test_extract_urls_accepts_new_supported_shapes(plugin, keys):
     assert urls == [
         "https://t.bilibili.com/123456789012345678",
         "https://www.bilibili.com/opus/123",
-        "https://chii.in/subject/topic/123",
         "https://h5.pipix.com/s/abc",
         "https://share.xiaochuankeji.cn/hybrid/share/post?pid=123",
         "https://s.izuiyou.com/s/23BpI",

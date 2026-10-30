@@ -28,7 +28,7 @@ from nonebot.matcher import Matcher
 from nonebot.params import CommandArg, RawCommand
 from nonebot.rule import Rule
 
-from . import audio, feedback, keys
+from . import audio, feedback, keys, platforms
 from .service import handle, handle_audio, session_key, session_name
 
 if TYPE_CHECKING:
@@ -285,9 +285,13 @@ def create_matchers(app: App) -> Matchers:
     @platform_cmd.handle()
     async def _handle_platforms() -> None:
         """处理 ``解析平台`` 命令。"""
-        listed = await app.client.platforms()
+        listed = [
+            item
+            for item in await app.client.platforms()
+            if item.get("id") in platforms.SUPPORTED_PLATFORMS
+        ]
         if not listed:
-            await platform_cmd.finish("ParseHub 没有加载到任何平台。")
+            await platform_cmd.finish("ParseHub 没有加载到受支持的平台。")
         names = "、".join(f"{item['name']}({item['id']})" for item in listed)
         await platform_cmd.finish(
             f"ParseHub 支持 {len(listed)} 个平台：\n{names}"

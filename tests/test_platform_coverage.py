@@ -47,13 +47,19 @@ def upstream_platform_ids() -> set[str]:
     return found
 
 
-def test_every_upstream_platform_has_card_entry(platforms) -> None:
-    """上游每个 platform.id 都要能在卡片里查到，否则图标会退回默认的 X。"""
+def test_every_supported_platform_has_card_entry(platforms) -> None:
+    """白名单里的每个平台都要能在卡片里查到，否则图标会退回默认的 X。"""
+    missing = sorted(platforms.SUPPORTED_PLATFORMS - platforms.PLATFORMS.keys())
+    assert not missing, f"卡片平台表缺少这些 id：{missing}"
+
+
+def test_supported_platforms_exist_upstream(platforms) -> None:
+    """白名单里的 id 必须仍存在于上游；上游改名 / 删除时要显式处理。"""
     found = upstream_platform_ids()
     assert found, "没有发现任何上游 parser，枚举逻辑失效"
     assert "bilibili" in found, f"上游平台枚举不完整：{sorted(found)}"
-    missing = sorted(pid for pid in found if pid not in platforms.PLATFORMS)
-    assert not missing, f"卡片平台表缺少这些 id：{missing}"
+    missing = sorted(platforms.SUPPORTED_PLATFORMS - found)
+    assert not missing, f"白名单里这些 id 上游已没有：{missing}"
 
 
 def test_every_platform_logo_exists(platforms, card) -> None:
