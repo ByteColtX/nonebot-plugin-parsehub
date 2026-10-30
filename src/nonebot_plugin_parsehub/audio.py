@@ -23,7 +23,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
@@ -540,15 +540,18 @@ def _cookie_file(cookie: str, cookie_dir: Path | None) -> Iterator[list[str]]:
                     path = Path(file.name)
                     file.write("\n".join(lines) + "\n")
                 args = ["--cookies", str(path)]
-            except OSError:
+            except OSError as exc:
+                logger.warning(f"[parsehub] cookie 临时文件创建失败: {exc}")
                 if path is not None:
-                    path.unlink(missing_ok=True)
+                    with suppress(OSError):
+                        path.unlink(missing_ok=True)
                 args = []
     try:
         yield args
     finally:
         if path is not None:
-            path.unlink(missing_ok=True)
+            with suppress(OSError):
+                path.unlink(missing_ok=True)
 
 
 def youtube_audio(
