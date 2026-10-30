@@ -255,7 +255,8 @@ def render(
     draw_text(
         draw,
         (INSET + mark_w + KICKER_TEXT_GAP, kicker_y),
-        name.upper(),
+        # 保留官方大小写（YouTube / TikTok / bilibili），不要整行转大写
+        name,
         kicker_font,
         (226, 226, 232),
         emoji_size=KICKER_SIZE,
