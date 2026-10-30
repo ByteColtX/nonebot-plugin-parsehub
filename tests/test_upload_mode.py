@@ -27,15 +27,6 @@ class RecordingBot(Bot):
 
 
 @pytest.fixture()
-def tmp_media(tmp_path, monkeypatch, plugin, instance):
-    """把中转服务的根目录指到临时目录。"""
-    monkeypatch.setattr(instance.relay, "root", tmp_path)
-    monkeypatch.setattr(instance.endpoint, "host", "127.0.0.1")
-    monkeypatch.setattr(instance.endpoint, "port", 18899)
-    return tmp_path
-
-
-@pytest.fixture()
 def upload_mode(plugin, monkeypatch, instance, update_settings):
     """把上传模式切到指定值。"""
 
@@ -184,10 +175,13 @@ async def test_forward_nodes_follow_mode(
     second.write_bytes(b"two")
 
     bot = RecordingBot()
+    files = [_as_media(first), _as_media(second)]
+    refs = [await instance.delivery.ref(item.path) for item in files]
     assert await instance.delivery.send_forward(
         bot,
         make_group_event("x"),
-        [_as_media(first), _as_media(second)],
+        files,
+        refs,
     )
 
     calls = [kw for api, kw in bot.calls if api == "send_group_forward_msg"]
@@ -331,3 +325,68 @@ async def test_relay_host_is_advertised_not_bound(
     await instance.startup()
     assert started == [("0.0.0.0", instance.settings.relay_port)]
     assert instance.endpoint.host == "media.example.com"
+
+
+@pytest.mark.asyncio
+async def test_forward_fallback_ref_computed_once(
+    plugin, monkeypatch, tmp_media, upload_mode, instance
+):
+    """base64 模式转发失败回退逐条时，每个文件只读一次。"""
+    upload_mode("base64")
+    first = tmp_media / "one.jpg"
+    second = tmp_media / "two.jpg"
+    first.write_bytes(b"one")
+    second.write_bytes(b"two")
+    reads: dict[str, int] = {}
+
+    real_to_base64 = plugin.delivery._to_base64
+
+    def counting(path):
+        key = Path(path).name
+        reads[key] = reads.get(key, 0) + 1
+        return real_to_base64(path)
+
+    monkeypatch.setattr(plugin.delivery, "_to_base64", counting)
+
+    class NoForwardBot(RecordingBot):
+        async def call_api(self, api, **kwargs):  # type: ignore[override]
+            if api == "send_group_forward_msg":
+                raise RuntimeError("forward not supported")
+            return await super().call_api(api, **kwargs)
+
+    bot = NoForwardBot()
+    report = await instance.delivery.send_media(
+        bot, make_group_event("x"), [_as_media(first), _as_media(second)]
+    )
+
+    assert [item.path.name for item in report.sent] == ["one.jpg", "two.jpg"]
+    assert reads == {"one.jpg": 1, "two.jpg": 1}, reads
+
+
+@pytest.mark.asyncio
+async def test_unreadable_file_counted_failed(
+    plugin, monkeypatch, tmp_path, instance
+):
+    """硬链接和复制都失败时文件必须记失败，不能发一个必败的引用。"""
+    # 文件必须在中转根目录之外，否则「已在任务目录下」会直接短路返回
+    monkeypatch.setattr(instance.relay, "root", tmp_path / "relay")
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    image = media_dir / "gone.jpg"
+    image.write_bytes(b"img")
+
+    def boom(*args, **kwargs):
+        raise OSError("no space left")
+
+    monkeypatch.setattr("os.link", boom)
+    monkeypatch.setattr("shutil.copy2", boom)
+
+    bot = RecordingBot()
+    report = await instance.delivery.send_media(
+        bot, make_group_event("x"), [_as_media(image)]
+    )
+
+    assert [item.path.name for item in report.failed] == ["gone.jpg"]
+    assert not report.sent
+    # 不发必败的媒体投递；按 fail_notice 补一条文字提示（与逐条失败一致）
+    assert [api for api, _ in bot.calls] == ["send_msg"]
