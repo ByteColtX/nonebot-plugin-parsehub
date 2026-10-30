@@ -547,6 +547,7 @@ def youtube_audio(
     proxy: str = "",
     cookie: str = "",
     cookie_dir: Path | None = None,
+    timeout: float = _YT_PARSE_TIMEOUT,
 ) -> YtAudio:
     """用 yt-dlp 拿一个 YouTube 视频的元信息（不下载）。
 
@@ -555,6 +556,7 @@ def youtube_audio(
         proxy: 代理；空串表示直连。
         cookie: 登录态 cookie（规避 bot 检测）；空串表示不带。
         cookie_dir: 一次性 cookie 文件目录；带 cookie 时必填。
+        timeout: 子进程超时（秒）；调用方应传剩余总预算。
 
     Returns:
         视频元信息。
@@ -572,7 +574,7 @@ def youtube_audio(
                 args + cookie_args + [url],
                 capture_output=True,
                 text=True,
-                timeout=_YT_PARSE_TIMEOUT,
+                timeout=max(0.1, timeout),
             )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError("解析视频信息超时") from exc
