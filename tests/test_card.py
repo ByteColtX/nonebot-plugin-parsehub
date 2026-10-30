@@ -86,7 +86,6 @@ def test_tiktok_duration_is_seconds(card) -> None:
     """TikTok 的 duration 是秒（cv2 实测 30fps×366 帧=12.20s），不能按毫秒除。"""
     tiktok = FakeResult(platform_id="tiktok", media=FakeRef(duration=12))
     assert card.layout.platform_uses_milliseconds(tiktok) is False
-    assert card.layout.video_seconds(tiktok) == 12
     assert card.layout.meta_line(tiktok, 1, False) == "视频 · 00:12"
 
     # 抖音 / 小红书仍然是毫秒
@@ -94,18 +93,8 @@ def test_tiktok_duration_is_seconds(card) -> None:
         FakeResult(platform_id="douyin")
     )
     assert card.layout.platform_uses_milliseconds(FakeResult(platform_id="xhs"))
-    assert (
-        card.layout.video_seconds(
-            FakeResult(platform_id="douyin", media=FakeRef(duration=12000))
-        )
-        == 12
-    )
-    assert (
-        card.layout.video_seconds(
-            FakeResult(platform_id="xhs", media=FakeRef(duration=7967))
-        )
-        == 7
-    )
+    # 毫秒 → 秒的换算由 platforms.duration_seconds 负责，
+    # 服务侧行为在 test_duration_limit.py 里经完整链路覆盖。
 
 
 def test_meta_line_image_with_count(card) -> None:
@@ -134,9 +123,9 @@ def test_platform_of_known_and_unknown(card) -> None:
 
 def test_wrap_keeps_hashtag_whole(card) -> None:
     """话题标签不会被从中间劈开。"""
-    font = card.fonts._font(58, 700)
+    font = card.fonts.font_for(58, 700)
     title = "泳装小鸟是对的 #知更鸟晴歌 #崩坏星穹铁道 #知更鸟"
-    lines = card.layout.wrap(title, font, 900, 3)
+    lines = card.text.wrap(title, font, 900, 3)
     assert len(lines) >= 2
     for line in lines[:-1]:
         assert not line.endswith("#")
@@ -147,16 +136,16 @@ def test_wrap_keeps_hashtag_whole(card) -> None:
 
 def test_fit_title_drops_trailing_tags(card) -> None:
     """放不下时整条丢掉末尾标签，而不是截成 #知更…。"""
-    font = card.fonts._font(58, 700)
+    font = card.fonts.font_for(58, 700)
     title = "泳装小鸟是对的 #知更鸟晴歌 #崩坏星穹铁道 #知更鸟"
-    lines = card.layout.fit_title(title, font, 700, 2)
+    lines = card.text.fit_title(title, font, 700, 2)
     joined = "".join(lines)
     assert "…" not in joined or "#知更" not in joined
 
 
 def test_vertical_mask_monotonic(card) -> None:
     """竖直遮罩尺寸正确、从上到下单调变深。"""
-    mask = card.layout._vertical_mask((64, 100), 20, 80, peak=200)
+    mask = card.compose.vertical_mask((64, 100), 20, 80, peak=200)
     assert mask.size == (64, 100)
     column = [mask.getpixel((0, y)) for y in range(100)]
     assert column[0] == 0
@@ -203,7 +192,7 @@ def test_render_without_font_raises(tmp_path: Path, card) -> None:
     """没有字体时渲染抛错，由调用方退回文字。"""
     card.fonts._CUSTOM_FONT = None  # noqa: SLF001 - 测试里直接改模块状态
     card.fonts._font_file.cache_clear()  # noqa: SLF001
-    card.fonts._font.cache_clear()  # noqa: SLF001
+    card.fonts.font_for.cache_clear()  # noqa: SLF001
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(card.fonts, "SYSTEM_FONTS", ("/nonexistent/font.ttf",))
     try:
@@ -246,9 +235,9 @@ def _stripe_mark(colors: list[tuple[int, int, int]]) -> Image.Image:
 
 def test_is_dark_whitens_greyscale_marks(card) -> None:
     """纯黑白的标在深色封面上会消失，必须转白。"""
-    assert card.layout._is_dark(_stripe_mark([(0, 0, 0)])) is True
+    assert card.compose.is_dark(_stripe_mark([(0, 0, 0)])) is True
     assert (
-        card.layout._is_dark(_stripe_mark([(10, 10, 10), (120, 120, 120)]))
+        card.compose.is_dark(_stripe_mark([(10, 10, 10), (120, 120, 120)]))
         is True
     )
 
@@ -256,12 +245,12 @@ def test_is_dark_whitens_greyscale_marks(card) -> None:
 def test_is_dark_keeps_brand_coloured_marks(card) -> None:
     """带品牌色的标（抖音的黑 + 青 + 红）转白会把颜色抹掉，保留原色。"""
     douyin = [(0, 0, 0), (38, 244, 238), (251, 44, 83)]
-    assert card.layout._is_dark(_stripe_mark(douyin)) is False
+    assert card.compose.is_dark(_stripe_mark(douyin)) is False
 
 
 def test_is_dark_keeps_bright_marks(card) -> None:
     """本来就不暗的标（B 站粉）不用转白。"""
-    assert card.layout._is_dark(_stripe_mark([(251, 114, 153)])) is False
+    assert card.compose.is_dark(_stripe_mark([(251, 114, 153)])) is False
 
 
 def test_logo_sits_on_kicker_row(tmp_path: Path, card) -> None:
