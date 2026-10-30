@@ -164,16 +164,33 @@ def test_extract_bilibili_prefers_first(audio):
     assert audio.extract_bilibili(text) == "https://b23.tv/w8J4aMY"
 
 
-def test_has_av_number(audio):
-    """av 号（大小写都算）能被识别，好给出专门提示。"""
-    assert audio.has_av_number("av170001") is True
-    assert audio.has_av_number("AV170001") is True
-    assert (
-        audio.has_av_number("https://www.bilibili.com/video/av170001") is True
+def test_extract_bilibili_bare_av(audio):
+    """裸 AV 号（大小写都算）换算成等价的 BV 链接。"""
+    expected = "https://www.bilibili.com/video/BV17x411w7KC"
+    assert audio.extract_bilibili("av170001") == expected
+    assert audio.extract_bilibili("AV170001") == expected
+    # 新号段实测号对（B 站 view 接口 aid / bvid 互查一致）
+    assert audio.extract_bilibili("av117047807707449") == (
+        "https://www.bilibili.com/video/BV1tTun6hE3Z"
     )
-    # nav123 的 av 前贴着字母，不算
-    assert audio.has_av_number("nav123") is False
-    assert audio.has_av_number("BV1A2xL67EMP") is False
+    assert audio.extract_bilibili("av117528055514733") == (
+        "https://www.bilibili.com/video/BV1oxxY69Es4"
+    )
+
+
+def test_extract_bilibili_av_link_keeps_part(audio):
+    """AV 链接换成 BV 链接，分P参数跟着走。"""
+    url = "https://m.bilibili.com/video/av117528055514733?p=2"
+    assert audio.extract_bilibili(url) == (
+        "https://www.bilibili.com/video/BV1oxxY69Es4?p=2"
+    )
+
+
+def test_extract_bilibili_av_boundaries(audio):
+    """前后紧贴字母数字、或不在 B 站链接里的 av 串都不算目标。"""
+    assert audio.extract_bilibili("nav123") is None
+    assert audio.extract_bilibili("av170001x") is None
+    assert audio.extract_bilibili("https://example.com/av170001") is None
 
 
 def test_extract_youtube_variants(audio):
@@ -721,6 +738,67 @@ def test_download_bilibili_stops_at_deadline(audio, monkeypatch, tmp_path):
     assert dest.read_bytes() == b"a" * 16
 
 
+def test_bilibili_audio_converts_av_before_request(audio, monkeypatch):
+    """AV 链接在请求前就换算成 BV 号，接口只收 bvid。"""
+    requested: list[str] = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, payload: dict):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            pass
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, params=None, **kwargs):
+            if url == audio._SPI_URL:
+                return Response({"data": {"b_3": "b3", "b_4": "b4"}})
+            requested.append(params["bvid"])
+            if url == audio._VIEW_URL:
+                return Response(
+                    {
+                        "code": 0,
+                        "data": {
+                            "title": "t",
+                            "bvid": "BV1oxxY69Es4",
+                            "pages": [{"cid": 1, "duration": 10}],
+                        },
+                    }
+                )
+            return Response(
+                {
+                    "code": 0,
+                    "data": {
+                        "dash": {
+                            "audio": [{"baseUrl": "https://a", "bandwidth": 1}]
+                        }
+                    },
+                }
+            )
+
+    monkeypatch.setattr(audio.httpx, "Client", Client)
+    info = audio.bilibili_audio(
+        "https://m.bilibili.com/video/av117528055514733"
+    )
+
+    assert info.bvid == "BV1oxxY69Es4"
+    assert requested == ["BV1oxxY69Es4", "BV1oxxY69Es4"]
+
+
 @pytest.mark.asyncio
 async def test_handle_audio_fetch_failure_notice(
     plugin, monkeypatch, instance, service
@@ -1121,7 +1199,7 @@ async def test_bm_matcher_no_target_shows_usage(
         ctx.receive_event(bot, event)
         ctx.should_call_send(
             event,
-            "用法：bm <BV 号或 B 站链接>（-f 以文件发送）",
+            "用法：bm <BV/AV 号或 B 站链接>（-f 以文件发送）",
             result=None,
             bot=bot,
         )
@@ -1131,8 +1209,10 @@ async def test_bm_matcher_no_target_shows_usage(
 
 
 @pytest.mark.asyncio
-async def test_bm_matcher_av_hint(app, plugin, monkeypatch, instance, matchers):
-    """av 号专门提示不支持。"""
+async def test_bm_matcher_av_dispatches(
+    app, plugin, monkeypatch, instance, matchers
+):
+    """bm 收到 AV 号时换算成 BV 链接交给音频链路。"""
     seen: list = []
     _recorder(plugin, monkeypatch, seen)
 
@@ -1140,15 +1220,12 @@ async def test_bm_matcher_av_hint(app, plugin, monkeypatch, instance, matchers):
     async with app.test_matcher(matchers.bm) as ctx:
         bot = ctx.create_bot(base=Bot, adapter=_adapter())
         ctx.receive_event(bot, event)
-        ctx.should_call_send(
-            event,
-            "不支持 AV 号，请发 BV 号或视频链接。",
-            result=None,
-            bot=bot,
-        )
+        ctx.should_pass_rule()
         ctx.should_finished()
 
-    assert seen == []
+    assert seen == [
+        ("https://www.bilibili.com/video/BV17x411w7KC", "bilibili", False)
+    ]
 
 
 @pytest.mark.asyncio

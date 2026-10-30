@@ -42,7 +42,13 @@ from .bilibili import (
     SHORT_HOSTS as _BILI_SHORT_HOSTS,
 )
 from .bilibili import (
-    VIDEO_URL as _BILI_VIDEO_URL,
+    bare_video_urls as _bare_video_urls,
+)
+from .bilibili import (
+    bvid_of as _bvid_of,
+)
+from .bilibili import (
+    video_url as _video_url,
 )
 
 # ---------------------------------------------------------------------------
@@ -54,10 +60,6 @@ _URL_RE = re.compile(
     re.IGNORECASE,
 )
 _TRAILING = "。，、；：！？)）】》\"'"
-
-# 裸 BV 号 / av 号：裸 BV 号见 :mod:`bilibili`（与 keys 共用同一份模式），
-# 前后不能紧贴字母数字，免得切出更长的串。
-_AV_RE = re.compile(r"(?<![0-9A-Za-z])[aA][vV]\d+")
 
 # YouTube 相关主机。
 _YT_HOSTS = ("youtube.com", "youtu.be")
@@ -172,8 +174,9 @@ def extract_bilibili(text: str) -> str | None:
     """从命令参数里挑出 B 站视频目标。
 
     认完整链接（``bilibili.com/video/BVxxx``，分P参数保留）、短链
-    （``b23.tv``，展开推迟到获取阶段）和裸 BV 号；动态 / 专栏 / av 号链接
-    不算目标。多个目标时取最先出现的。
+    （``b23.tv``，展开推迟到获取阶段）、裸 BV 号和裸 AV 号；动态 / 专栏
+    不算目标。AV 号是老编号，这里换算成等价的 BV 号，和 BV 链接共用同一
+    份 key / 缓存。多个目标时取最先出现的。
 
     Args:
         text: 剩余命令参数，可以是分享文案。
@@ -190,16 +193,14 @@ def extract_bilibili(text: str) -> str | None:
         host = _host_of(url)
         if not _host_in(host, _BILI_HOSTS):
             continue
-        if _host_in(host, _BILI_SHORT_HOSTS) or _BV_RE.search(url):
+        if _host_in(host, _BILI_SHORT_HOSTS):
             candidates.append((match.start(), url))
-    for match in _BV_RE.finditer(text):
-        start, end = match.span()
-        if any(
-            start < span_end and span_start < end
-            for span_start, span_end in spans
-        ):
-            continue
-        candidates.append((start, _BILI_VIDEO_URL.format(match.group(1))))
+        elif _BV_RE.search(url):
+            candidates.append((match.start(), url))
+        elif (bvid := _bvid_of(url)) is not None:
+            # AV 号链接换成 BV 号链接，分P参数跟着查询串走
+            candidates.append((match.start(), _video_url(bvid, url)))
+    candidates.extend(_bare_video_urls(text, spans))
     if not candidates:
         return None
     candidates.sort(key=lambda item: item[0])
@@ -233,18 +234,6 @@ def extract_youtube(text: str) -> str | None:
     ):
         return _YT_BARE_URL.format(stripped)
     return None
-
-
-def has_av_number(text: str) -> bool:
-    """文本里有没有 av 号（老编号），用来给专门的提示。
-
-    Args:
-        text: 剩余命令参数。
-
-    Returns:
-        有 av 号为 ``True``。
-    """
-    return bool(_AV_RE.search(text or ""))
 
 
 def file_stem(title: str, fallback: str, part: int = 1) -> str:
@@ -372,10 +361,11 @@ def bilibili_audio(url: str, proxy: str = "") -> BiliAudio:
         if _host_in(_host_of(url), _BILI_SHORT_HOSTS):
             url = str(client.get(url).url)
 
-        bvid_match = _BV_RE.search(url)
-        if not bvid_match:
-            raise RuntimeError("不是 B 站视频链接（只支持 BV 号或视频链接）")
-        bvid = bvid_match.group(1)
+        bvid = _bvid_of(url)
+        if bvid is None:
+            raise RuntimeError(
+                "不是 B 站视频链接（只支持 BV / AV 号或视频链接）"
+            )
         part = _part_of(url)
 
         view = _get_json(client, _VIEW_URL, {"bvid": bvid}, cookies)

@@ -353,7 +353,6 @@ def create_matchers(app: App) -> Matchers:
         platform_id: str,
         extract: Callable[[str], str | None],
         usage: Callable[[], str],
-        av_hint: Callable[[], str] | None = None,
     ) -> None:
         """注册一个音频命令的处理器（bm / ym 共用同一套骨架）。
 
@@ -362,7 +361,6 @@ def create_matchers(app: App) -> Matchers:
             platform_id: 平台 id（``bilibili`` / ``youtube``）。
             extract: 从剩余文本里提取目标链接，提不到为 ``None``。
             usage: 用法提示文案。
-            av_hint: 命中了 ``av`` 号这类近形输入时的提示；没有为 ``None``。
         """
 
         @cmd.handle()
@@ -376,8 +374,6 @@ def create_matchers(app: App) -> Matchers:
             as_file, rest = audio.parse_command(args.extract_plain_text())
             target = extract(rest)
             if target is None:
-                if av_hint is not None and audio.has_av_number(rest):
-                    await cmd.finish(av_hint())
                 await cmd.finish(usage())
             await handle_audio(
                 app, bot, event, target, platform_id, as_file=as_file
@@ -388,7 +384,6 @@ def create_matchers(app: App) -> Matchers:
         "bilibili",
         audio.extract_bilibili,
         feedback.audio_usage_bili,
-        av_hint=feedback.audio_av_hint,
     )
     _audio_handler(
         ym,
