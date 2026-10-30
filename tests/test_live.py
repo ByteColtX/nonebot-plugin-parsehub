@@ -33,6 +33,56 @@ def _info(**overrides):
     return LiveInfo(**fields)
 
 
+class _Response:
+    """只实现 fetch_live 用到的 json()。"""
+
+    def __init__(self, payload=None, error=None):
+        self.payload = payload
+        self.error = error
+
+    def json(self):
+        if self.error is not None:
+            raise self.error
+        return self.payload
+
+
+def _patch_live_http(monkeypatch, live_mod, room, anchor):
+    """把 httpx.Client 换成按 URL 返回固定响应的假客户端。"""
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, params=None):
+            if url == live_mod._ROOM_INFO_URL:
+                if isinstance(room, Exception):
+                    raise room
+                return room
+            if url == live_mod._ANCHOR_URL:
+                if isinstance(anchor, Exception):
+                    raise anchor
+                return anchor
+            raise AssertionError(url)
+
+    monkeypatch.setattr(live_mod.httpx, "Client", lambda **kwargs: Client())
+
+
+def _room_payload() -> dict:
+    return {
+        "code": 0,
+        "data": {
+            "room_id": 22603245,
+            "title": "直播标题",
+            "user_cover": "cover.jpg",
+            "keyframe": "frame.jpg",
+            "live_status": 1,
+        },
+    }
+
+
 def test_content_key_live_url(keys):
     """直播间链接归一成独立 key，不跟视频撞缓存。"""
     assert keys.content_key(_LIVE_URL) == "bilibili_live:22603245"
@@ -61,6 +111,50 @@ def test_room_id_from(live_mod):
     assert live_mod.room_id_from(_LIVE_URL) == 22603245
     assert live_mod.room_id_from("https://live.bilibili.com/510/") == 510
     assert live_mod.room_id_from(_SHORT_URL) is None
+
+
+def test_fetch_live_anchor_timeout_keeps_room(live_mod, monkeypatch):
+    """主播接口超时只少名字，房间信息照常返回。"""
+    _patch_live_http(
+        monkeypatch,
+        live_mod,
+        _Response(_room_payload()),
+        live_mod.httpx.TimeoutException("timeout"),
+    )
+
+    info = live_mod.fetch_live(_LIVE_URL)
+    assert info is not None
+    assert info.room_id == 22603245
+    assert info.title == "直播标题"
+    assert info.uname == ""
+
+
+def test_fetch_live_anchor_non_json_keeps_room(live_mod, monkeypatch):
+    """主播接口返回非 JSON 也只少名字，不丢房间信息。"""
+    _patch_live_http(
+        monkeypatch,
+        live_mod,
+        _Response(_room_payload()),
+        _Response(error=ValueError("not json")),
+    )
+
+    info = live_mod.fetch_live(_LIVE_URL)
+    assert info is not None
+    assert info.room_id == 22603245
+    assert info.title == "直播标题"
+    assert info.uname == ""
+
+
+def test_fetch_live_room_failure_still_none(live_mod, monkeypatch):
+    """房间信息本身失败时仍然返回 None，主播成功也救不回来。"""
+    _patch_live_http(
+        monkeypatch,
+        live_mod,
+        _Response(error=ValueError("not json")),
+        _Response({"code": 0, "data": {"info": {"uname": "主播"}}}),
+    )
+
+    assert live_mod.fetch_live(_LIVE_URL) is None
 
 
 def test_build_result_live_prefers_keyframe(live_mod):

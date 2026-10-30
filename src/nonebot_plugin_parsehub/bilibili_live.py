@@ -166,6 +166,7 @@ def fetch_live(url: str, proxy: str = "") -> LiveInfo | None:
     room_id = room_id_from(url)
     if room_id is None:
         return None
+    anchor_payload: dict[str, Any] = {}
     try:
         with httpx.Client(
             timeout=_TIMEOUT,
@@ -176,9 +177,24 @@ def fetch_live(url: str, proxy: str = "") -> LiveInfo | None:
             info_response = client.get(
                 _ROOM_INFO_URL, params={"room_id": room_id}
             )
-            anchor_response = client.get(
-                _ANCHOR_URL, params={"roomid": room_id}
-            )
+            # 主播信息是可选装饰，单独兜底；它挂了不能拖累房间信息。
+            try:
+                anchor_response = client.get(
+                    _ANCHOR_URL, params={"roomid": room_id}
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[parsehub] 主播信息获取失败 room={room_id}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            else:
+                try:
+                    anchor_payload = anchor_response.json()
+                except ValueError as exc:
+                    logger.warning(
+                        f"[parsehub] 主播接口返回的不是 JSON "
+                        f"room={room_id}: {exc}"
+                    )
     except Exception as exc:  # 网络问题都算取数失败
         logger.warning(
             f"[parsehub] 直播间信息获取失败 {url}: {type(exc).__name__}: {exc}"
@@ -187,9 +203,11 @@ def fetch_live(url: str, proxy: str = "") -> LiveInfo | None:
 
     try:
         info_payload = info_response.json()
-        anchor_payload = anchor_response.json()
     except ValueError as exc:
         logger.warning(f"[parsehub] 直播间接口返回的不是 JSON: {exc}")
+        return None
+    if not isinstance(info_payload, dict):
+        logger.warning(f"[parsehub] 直播间接口返回的不是对象 room={room_id}")
         return None
     if info_payload.get("code") != 0:
         logger.warning(
@@ -197,6 +215,8 @@ def fetch_live(url: str, proxy: str = "") -> LiveInfo | None:
             f"{info_payload.get('code')}/{info_payload.get('message')}"
         )
         return None
+    if not isinstance(anchor_payload, dict):
+        anchor_payload = {}
     if anchor_payload.get("code") != 0:
         logger.warning(
             f"[parsehub] 主播信息获取失败 room={room_id}: "
