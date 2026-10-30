@@ -62,7 +62,7 @@ async def send_card_or_text(
         files: 已下载的本地媒体。
         proxy: 取封面用的代理。
         allow_text: 出不了卡时是否立刻退回文字。下载前那次调用要传 ``False``，
-            否则文字先发了，等下载完再抽帧出卡就成了重复消息。卡片成功时，
+            否则文字先发了，等下载完再出卡就成了重复消息。卡片成功时，
             没有标题的正文帖仍会补发正文（卡片只放得下摘要）。
         caption: 调用方指定的正文（长正文平台会放进合并转发）。为 ``None``
             时沿用「无标题才补正文」的旧规则。
@@ -81,7 +81,7 @@ async def send_card_or_text(
             if files or allow_text:
                 logger.info("[parsehub] 没有可用封面，卡片跳过")
             else:
-                # 下载前那次没封面是正常的：下载后还会用视频帧重试。
+                # 下载前那次没封面是正常的：下载后会用本地图片 / 视频帧重试。
                 logger.debug("[parsehub] 暂时没有封面，下载后重试")
         if out_path is not None and await app.delivery.send_card(
             sender, event, out_path

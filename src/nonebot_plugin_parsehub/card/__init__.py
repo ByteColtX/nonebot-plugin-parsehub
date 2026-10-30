@@ -9,7 +9,7 @@
 内部按职责拆成五个子模块：
 
 - :mod:`fonts`：字体来源、sha256 校验、emoji / 回退字体；
-- :mod:`cover`：封面三级兜底（thumb_url → 图片媒体 → 视频抽帧）；
+- :mod:`cover`：封面兜底（thumb_url → 图片媒体 → 本地图片 / 视频帧）；
 - :mod:`text`：emoji 切分、字形链、折行与绘制；
 - :mod:`compose`：渐变遮罩与平台 logo 处理；
 - :mod:`layout`：版式与渲染。
@@ -78,7 +78,7 @@ class CardRenderer:
 
         Args:
             result: ParseHub 解析结果。
-            files: 已下载的本地媒体，抽帧兜底要用。
+            files: 已下载的本地媒体，图片直读、视频抽帧兜底要用。
             task_dir: 任务目录；为 ``None`` 时另建一个。
             proxy: 取封面用的代理（海外平台的封面 CDN 直连会超时）。
 
