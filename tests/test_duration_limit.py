@@ -233,6 +233,29 @@ async def test_millisecond_platform_converts_before_checking(
 
 
 @pytest.mark.asyncio
+async def test_kuaishou_milliseconds_are_not_treated_as_long(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """快手报告 11933，实际 11.93 秒，不能按 11933 秒拦下载。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=11933,
+        platform_id="kuaishou",
+        display_name="快手",
+        media_mod=media_mod,
+    )
+    bot = FakeBot()
+    await service.handle(
+        instance, bot, make_group_event("https://v.kuaishou.com/abc"), URL
+    )
+    assert calls["download"] == 1, "12 秒的快手视频不该被时长上限拦下"
+    assert not any("太长" in t for t in bot.sent_texts), bot.sent_texts
+
+
+@pytest.mark.asyncio
 async def test_long_seconds_video_is_blocked(
     plugin, monkeypatch, tmp_media, card, instance, service, media_mod
 ):
