@@ -278,6 +278,43 @@ def test_youtube_audio_cookie_requires_dir(plugin):
         plugin.audio.youtube_audio("https://youtu.be/x", cookie="SID=secret")
 
 
+def test_youtube_audio_cookie_file_error_falls_back(
+    plugin, monkeypatch, tmp_path
+):
+    """临时文件创建失败时只告警，不把 cookie 塞进 argv。"""
+
+    def boom(**kwargs):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(plugin.audio.tempfile, "NamedTemporaryFile", boom)
+    seen: list[str] = []
+
+    def fake_run(args, **kwargs):
+        seen.extend(args)
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps(
+                {
+                    "id": "x",
+                    "title": "t",
+                    "duration": 1,
+                    "webpage_url": "https://youtu.be/x",
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(plugin.audio.subprocess, "run", fake_run)
+    info = plugin.audio.youtube_audio(
+        "https://youtu.be/x",
+        cookie="SID=secret",
+        cookie_dir=tmp_path / "cache" / "tmp",
+    )
+    assert info.video_id == "x"
+    assert "--cookies" not in seen
+
+
 def test_youtube_audio_passes_bounded_timeout(plugin, monkeypatch):
     """元信息子进程超时受调用方预算约束，0 也至少给 0.1 秒。"""
     seen: list[float] = []

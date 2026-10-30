@@ -1312,6 +1312,24 @@ def test_cleanup_removes_old_dirs(plugin, tmp_media, instance):
     assert not old.exists()
 
 
+def test_sweep_tmp_removes_stale_cookie_files(tmp_path):
+    """崩溃残留的旧 cookie 文件会被清掉，新的保留。"""
+    from nonebot_plugin_parsehub.app import _sweep_tmp
+
+    old = tmp_path / "parsehub-yt-old.cookies"
+    new = tmp_path / "parsehub-yt-new.cookies"
+    old.write_text("secret", encoding="utf-8")
+    new.write_text("secret", encoding="utf-8")
+
+    import os
+    import time
+
+    os.utime(old, (time.time() - 7200, time.time() - 7200))
+    assert _sweep_tmp(tmp_path) == 1
+    assert not old.exists()
+    assert new.exists()
+
+
 @pytest.mark.asyncio
 async def test_send_swallows_protocol_failure(plugin, monkeypatch, instance):
     """协议端拒绝发消息时只记警告，不能把异常抛给 matcher。"""
