@@ -167,17 +167,12 @@ def audio_too_large_notice(size: int) -> str:
 
 def audio_usage_bili() -> str:
     """Bm 命令的用法提示。"""
-    return "用法：bm <BV 号或 B 站链接>（-f 以文件发送）"
+    return "用法：bm <BV/AV 号或 B 站链接>（-f 以文件发送）"
 
 
 def audio_usage_yt() -> str:
     """Ym 命令的用法提示。"""
     return "用法：ym <YouTube 链接或视频 ID>（-f 以文件发送）"
-
-
-def audio_av_hint() -> str:
-    """Bm 收到 av 号时的提示。"""
-    return "不支持 AV 号，请发 BV 号或视频链接。"
 
 
 def audio_failed_notice(failure: ParseFailure) -> str:

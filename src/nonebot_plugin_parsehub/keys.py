@@ -18,13 +18,13 @@ from collections.abc import Iterator
 from urllib.parse import parse_qsl, urlsplit
 
 from .bilibili import (
-    BV_PATTERN as _BV_PATTERN,
-)
-from .bilibili import (
     SHORT_HOSTS as _BILIBILI_SHORT_HOSTS,
 )
 from .bilibili import (
-    VIDEO_URL as _BILIBILI_VIDEO_URL,
+    av_to_bvid as _av_to_bvid,
+)
+from .bilibili import (
+    bare_video_urls as _bare_video_urls,
 )
 
 # 域名 → parsehub 平台 id。白名单与平台识别共用这一份表：加平台时域名和 id
@@ -190,8 +190,11 @@ _URL_PATTERN = re.compile(
 )
 _TRAILING_CHARS = "。，、；：！？)）】》\"'"
 
+# AV 号路径特征：AV 号与 BV 号指向同一个作品，归一化时换算成 BV。
+_AV_ID_PATTERN = re.compile(r"/av(\d+)")
+
 # 平台内容的 ID 特征：命中就能把同一个作品的各种写法归一成同一个 key。
-# 顺序有意义，更具体的排前面（直播间 > 动态 > opus > BV > av）。
+# 顺序有意义，更具体的排前面（直播间 > 动态 > opus > BV > AV）。
 _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # 直播间：live.bilibili.com/<room_id>，与视频共用 bilibili 平台但独立成 key
     ("bilibili_live", re.compile(r"live\.bilibili\.com/(\d+)")),
@@ -200,7 +203,7 @@ _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # B 站专栏
     ("bilibili", re.compile(r"/opus/(\d+)")),
     ("bilibili", re.compile(r"(BV[0-9A-Za-z]{10})")),
-    ("bilibili", re.compile(r"/av(\d+)")),
+    ("bilibili", _AV_ID_PATTERN),
     ("douyin", re.compile(r"/video/(\d{6,})")),
     ("douyin", re.compile(r"/note/(\d{6,})")),
     ("douyin", re.compile(r"[?&]modal_id=(\d{6,})")),
@@ -343,11 +346,12 @@ def extract_urls(text: str) -> list[str]:
 
 
 def extract_targets(text: str) -> list[str]:
-    """从消息文本里挑出所有要解析的目标：链接和裸 BV 号。
+    """从消息文本里挑出所有要解析的目标：链接、裸 BV 号和裸 AV 号。
 
-    裸 BV 号（``BV1xx411c7mD``）拼成 ``https://www.bilibili.com/video/...`` 再
-    往下走，这样它和完整链接归一成同一个作品 key，缓存也共用。已经写在链接里的
-    BV 号不重复取，两个都发时只留链接本身。
+    裸编号（``BV1xx411c7mD`` / ``av170001``）拼成
+    ``https://www.bilibili.com/video/...`` 再往下走；AV 号先换算成等价的
+    BV 号，这样同一条视频的各种写法归一成同一个作品 key，缓存也共用。已经
+    写在链接里的编号不重复取，两个都发时只留链接本身。
 
     Args:
         text: 消息纯文本，可以是分享文案。
@@ -356,20 +360,13 @@ def extract_targets(text: str) -> list[str]:
         去重且保持出现顺序的链接列表；没有命中时返回空列表。
     """
     text = text or ""
-    # 链接的原始范围（含不在白名单里的）：里面的 BV 号归 extract_urls 管，
+    # 链接的原始范围（含不在白名单里的）：里面的编号归 extract_urls 管，
     # 别从 example.com/BV... 这种链接里再抠一个 B 站视频出来。
     spans = [match.span() for match in _URL_PATTERN.finditer(text)]
     found: list[tuple[int, str]] = list(_iter_urls(text))
     seen = {url for _, url in found}
 
-    for match in _BV_PATTERN.finditer(text):
-        start, end = match.span()
-        if any(
-            start < span_end and span_start < end
-            for span_start, span_end in spans
-        ):
-            continue
-        url = _BILIBILI_VIDEO_URL.format(match.group(1))
+    for start, url in _bare_video_urls(text, spans):
         if url in seen:
             continue
         seen.add(url)
@@ -424,7 +421,8 @@ def content_key(url: str, *, fold_case: bool = True) -> str:
     认得出作品 ID 的平台直接用 ``平台:id``，这样同一个作品的两种写法能对上——比如
     抖音的 ``v.douyin.com/xxx`` 和 ``iesdouyin.com/share/video/<id>``、B 站的
     ``b23.tv/xxx`` 和 ``bilibili.com/video/BVxxxx``（解析结果里的 ``raw_url``
-    已经是短链展开后的地址）、B 站动态的 18–19 位 ID、专栏的 ``opus/<id>``。
+    已经是短链展开后的地址）、B 站的 AV 号和 BV 号（AV 换算成 BV，同一个 key）、
+    B 站动态的 18–19 位 ID、专栏的 ``opus/<id>``。
     B 站带 ``p`` 时把分P也写进 key，避免不同 P 撞缓存。认不出来的退化成
     「主机 + 路径」，丢掉查询串和末尾斜杠。
 
@@ -440,6 +438,12 @@ def content_key(url: str, *, fold_case: bool = True) -> str:
         match = pattern.search(url)
         if match:
             ident = match.group(1)
+            if pattern is _AV_ID_PATTERN:
+                # AV 号换成等价的 BV 号；号段非法时保留原写法
+                try:
+                    ident = _av_to_bvid(int(ident))
+                except ValueError:
+                    ident = f"av{ident}"
             key = f"{name}:{ident.lower() if fold_case else ident}"
             if name == "bilibili":
                 part = _bilibili_part(url)

@@ -197,16 +197,32 @@ def test_content_key_instagram_prefixed_paths(plugin, keys):
 
 
 # --------------------------------------------------------------------------- #
-# 1b. 裸 BV 号
+# 1b. 裸 BV / AV 号
 # --------------------------------------------------------------------------- #
 BV = "BV1xx411c7mD"
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
+AV = "av117528055514733"
+AV_BV = "BV1oxxY69Es4"
+AV_URL = f"https://www.bilibili.com/video/{AV_BV}"
 
 
 def test_extract_targets_bare_bv(plugin, keys):
     """只发作品号也能触发，拼成标准链接再交给 parsehub。"""
     assert keys.extract_targets(BV) == [BV_URL]
     assert keys.extract_targets(f"看这个 {BV} 好笑") == [BV_URL]
+
+
+def test_extract_targets_bare_av(plugin, keys):
+    """裸 AV 号同样触发，并换算成等价的 BV 链接。"""
+    assert keys.extract_targets(AV) == [AV_URL]
+    assert keys.extract_targets(f"看这个 {AV} 好笑") == [AV_URL]
+
+
+def test_extract_targets_av_boundaries(plugin, keys):
+    """贴字母的 av 串、以及普通链接里的 av 串都不算。"""
+    assert keys.extract_targets(f"x{AV}") == []
+    assert keys.extract_targets(f"{AV}x") == []
+    assert keys.extract_targets(f"https://example.com/{AV}") == []
 
 
 def test_extract_targets_skips_bv_inside_url(plugin, keys):
@@ -236,6 +252,18 @@ def test_bare_bv_shares_key_with_link(plugin, keys):
     assert keys.content_key(BV_URL) == f"bilibili:{BV.lower()}"
 
 
+def test_av_shares_key_with_bv(plugin, keys):
+    """AV 号与 BV 号指向同一个作品：去重和缓存都对齐。"""
+    bv_key = f"bilibili:{AV_BV.lower()}"
+    assert keys.content_key(AV_URL) == bv_key
+    assert keys.content_key(f"https://m.bilibili.com/video/{AV}") == bv_key
+    # 分P照样区分
+    assert keys.content_key(f"{AV_URL}?p=2") == f"{bv_key}:p2"
+    assert keys.content_key(f"{AV_URL}?p=2") == keys.content_key(
+        f"https://www.bilibili.com/video/{AV_BV}?p=2"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # 2. 自动触发规则
 # --------------------------------------------------------------------------- #
@@ -249,6 +277,13 @@ async def test_auto_rule_matches_group_link(plugin, instance, triggers):
 async def test_auto_rule_matches_bare_bv(plugin, instance, triggers):
     """消息里只有 BV 号也自动解析。"""
     event = make_group_event(BV)
+    assert await triggers.should_auto(instance, event) is True
+
+
+@pytest.mark.asyncio
+async def test_auto_rule_matches_bare_av(plugin, instance, triggers):
+    """消息里只有 AV 号也自动解析。"""
+    event = make_group_event(AV)
     assert await triggers.should_auto(instance, event) is True
 
 

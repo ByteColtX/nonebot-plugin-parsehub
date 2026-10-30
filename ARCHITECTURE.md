@@ -42,7 +42,7 @@ src/nonebot_plugin_parsehub/
 ├── triggers.py         # matcher / 命令：只决定「处理谁」
 ├── service/            # 编排：works / audio / download / message / run / result
 ├── audio.py            # bm / ym 音频提取（B 站 playurl / yt-dlp）
-├── bilibili.py         # B 站常量（域名 / BV 正则，单一来源）
+├── bilibili.py         # B 站常量与编号换算（域名 / BV·AV 正则 / AV→BV，单一来源）
 ├── bilibili_live.py    # B 站直播间封面卡片
 ├── delivery.py         # 三种上传模式 + 合并转发/逐条 + 统一失败记账
 ├── feedback.py         # 表情回应与用户提示文案
