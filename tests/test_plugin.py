@@ -9,101 +9,17 @@ matcher 级别的端到端测试见 test_nonebug.py。
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from fake import make_group_event
-from nonebot.adapters.onebot.v11 import (
-    Bot,
-    Message,
+from fakes import (
+    FakeBot,
+    FakeDownloadResult,
+    FakeMediaRef,
+    FakeParseResult,
 )
+from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from nonebot.adapters.onebot.v11.exception import ActionFailed
-
-
-class FakeBot(Bot):
-    """记录所有 API 调用的假 Bot。"""
-
-    def __init__(self, *, fail_video: bool = False) -> None:
-        super().__init__(adapter=MagicMock(), self_id="10000")
-        self.calls: list[tuple[str, dict]] = []
-        self.fail_video = fail_video
-
-    async def call_api(self, api: str, **kwargs):  # type: ignore[override]
-        self.calls.append((api, kwargs))
-        if self.fail_video and api == "send_msg":
-            message = kwargs.get("message")
-            if isinstance(message, Message) and any(
-                seg.type == "video" for seg in message
-            ):
-                raise ActionFailed(
-                    status="failed",
-                    retcode=100,
-                    data=None,
-                    message="video not supported",
-                )
-        return {"status": "ok", "retcode": 0, "data": None}
-
-    @property
-    def sent_texts(self) -> list[str]:
-        out = []
-        for api, kwargs in self.calls:
-            if api != "send_msg":
-                continue
-            message = kwargs.get("message")
-            if isinstance(message, Message):
-                out.append(message.extract_plain_text())
-        return out
-
-
-class FakeMediaRef:
-    def __init__(self, url: str, ext: str = "mp4") -> None:
-        self.url = url
-        self.ext = ext
-        self.width = 1920
-        self.height = 1080
-        self.duration = 10
-
-
-class FakeParseResult:
-    def __init__(
-        self,
-        *,
-        title="标题",
-        content="正文",
-        media=None,
-        raw_url="https://b23.tv/abcd",
-    ) -> None:
-        self.title = title
-        self.content = content
-        self.media = media
-        self.raw_url = raw_url
-        self.platform = SimpleNamespace(id="bilibili", display_name="哔哩哔哩")
-
-
-class FakeMediaFile:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.width = 1920
-        self.height = 1080
-        self.duration = 10
-
-
-class FakeDownloadResult:
-    def __init__(self, files: list[Path], media=None) -> None:
-        self.media = (
-            media if media is not None else [FakeMediaFile(p) for p in files]
-        )
-
-
-@pytest.fixture()
-def tmp_media(tmp_path, monkeypatch, plugin, instance):
-    """把中转服务的根目录指到临时目录。"""
-    monkeypatch.setattr(instance.relay, "root", tmp_path)
-    monkeypatch.setattr(instance.endpoint, "host", "127.0.0.1")
-    monkeypatch.setattr(instance.endpoint, "port", 18899)
-    return tmp_path
 
 
 @pytest.fixture(autouse=True)
@@ -835,7 +751,8 @@ def test_content_unavailable_covers_fallback_variant(plugin, errors, feedback):
     exc = ContentUnavailableFallbackError([])
     assert errors.translate(exc).kind is errors.ErrorKind.UNAVAILABLE
     assert (
-        feedback.failure_notice(exc) == "这个作品已经不可用了（可能被删了）。"
+        feedback.failure_notice(errors.translate(exc))
+        == "这个作品已经不可用了（可能被删了）。"
     )
 
 
@@ -919,7 +836,7 @@ async def test_download_retries_transient_cdn_error(
     _patch_failing_download(
         instance, monkeypatch, tmp_media, calls, failures=1, media_mod=media_mod
     )
-    monkeypatch.setattr(plugin.service, "DOWNLOAD_RETRY_DELAY", 0)
+    monkeypatch.setattr(plugin.service.download, "DOWNLOAD_RETRY_DELAY", 0)
 
     bot = FakeBot()
     url = "https://b23.tv/abcd"
@@ -944,13 +861,13 @@ async def test_download_failure_after_retries_reports_short_error(
         failures=99,
         media_mod=media_mod,
     )
-    monkeypatch.setattr(plugin.service, "DOWNLOAD_RETRY_DELAY", 0)
+    monkeypatch.setattr(plugin.service.download, "DOWNLOAD_RETRY_DELAY", 0)
 
     bot = FakeBot()
     url = "https://b23.tv/abcd"
     await service.handle(instance, bot, make_group_event(url), url)
 
-    assert calls["download"] == service.DOWNLOAD_ATTEMPTS
+    assert calls["download"] == service.download.DOWNLOAD_ATTEMPTS
     texts = [text for text in bot.sent_texts if text]
     assert texts == ["下载失败：HTTP错误: 403"], texts
     # 下载失败也要给终点状态：先点「收到」，失败时补失败表情
@@ -1524,7 +1441,7 @@ def _wire_download_paths(
         "probe_size",
         lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
     )
-    monkeypatch.setattr(plugin.service, "DOWNLOAD_RETRY_DELAY", 0)
+    monkeypatch.setattr(plugin.service.download, "DOWNLOAD_RETRY_DELAY", 0)
     return calls
 
 
@@ -1623,7 +1540,6 @@ async def test_card_and_download_run_in_parallel(
 
 def _card_event(payload: str):
     """造一条只含 json 卡片段的消息（QQ 小程序分享就是这个形态）。"""
-    from nonebot.adapters.onebot.v11 import MessageSegment
 
     event = make_group_event("")
     event.message = Message(

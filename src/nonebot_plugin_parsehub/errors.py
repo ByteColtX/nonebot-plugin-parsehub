@@ -27,11 +27,9 @@ _NOISE = ("下载错误", "下载失败", "解析错误", "下载超时")
 class ErrorKind(StrEnum):
     """一次解析/下载失败的性质。"""
 
-    UNSUPPORTED = "unsupported"
     UNAVAILABLE = "unavailable"
     TIMEOUT = "timeout"
     NETWORK = "network"
-    PARSE = "parse"
     UNKNOWN = "unknown"
 
 
@@ -41,33 +39,25 @@ class ParseFailure(Exception):
     Attributes:
         kind: 失败性质，上层据此决定提示文案与是否重试。
         detail: 压平后的错误描述。
-        cause: 原始异常，仅用于日志。
     """
 
-    def __init__(
-        self,
-        kind: ErrorKind,
-        detail: str,
-        cause: BaseException | None = None,
-    ) -> None:
+    def __init__(self, kind: ErrorKind, detail: str) -> None:
         """记录分类结果。
 
         Args:
             kind: 失败性质。
             detail: 压平后的错误描述。
-            cause: 原始异常。
         """
         super().__init__(detail)
         self.kind = kind
         self.detail = detail
-        self.cause = cause
 
     @property
     def retryable(self) -> bool:
         """这类失败值不值得重试。
 
         Returns:
-            网络类失败为 True；超时、不可用、不支持都不重试。
+            网络类失败为 True；超时、不可用、未知都不重试。
         """
         return self.kind is ErrorKind.NETWORK
 
@@ -94,10 +84,10 @@ def short_error(exc: BaseException) -> str:
         head = lines[0].rstrip(":：")
         first = lines[1].lstrip("-").strip()
         text = f"{head}（{first}）" if first else head
-    return truncate_error(text)
+    return _truncate_error(text)
 
 
-def truncate_error(text: str) -> str:
+def _truncate_error(text: str) -> str:
     """错误提示太长时截断。
 
     Args:
@@ -147,17 +137,17 @@ def _classify(exc: BaseException) -> ErrorKind:
     """
     classes = _parsehub_errors()
     if isinstance(exc, classes.get("UnknownPlatform", ())):
-        return ErrorKind.UNSUPPORTED
+        return ErrorKind.UNKNOWN
     if isinstance(exc, classes.get("ContentUnavailableError", ())):
         return ErrorKind.UNAVAILABLE
     if isinstance(exc, classes.get("DownloadError", ())):
         return ErrorKind.NETWORK
     if isinstance(exc, classes.get("ParseError", ())):
-        return ErrorKind.PARSE
+        return ErrorKind.UNKNOWN
     # 异常被包装过时退回类名 / 文案判断。
     name = type(exc).__name__
     if "UnknownPlatform" in name:
-        return ErrorKind.UNSUPPORTED
+        return ErrorKind.UNKNOWN
     if "ContentUnavailable" in name or "作品不可用" in str(exc):
         return ErrorKind.UNAVAILABLE
     if "Download" in name:
@@ -184,4 +174,4 @@ def translate(exc: BaseException) -> ParseFailure:
         kind = ErrorKind.TIMEOUT
     elif kind is ErrorKind.UNKNOWN and isinstance(exc, httpx.HTTPError):
         kind = ErrorKind.NETWORK
-    return ParseFailure(kind, short_error(exc), exc)
+    return ParseFailure(kind, short_error(exc))

@@ -15,7 +15,7 @@ from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageEvent
 
 from .delivery import Sender
-from .errors import ErrorKind, short_error, translate
+from .errors import ErrorKind, ParseFailure
 from .platforms import display_name
 
 _BYTES_PER_MEGABYTE = 1024 * 1024
@@ -54,16 +54,15 @@ async def react(
         logger.debug(f"[parsehub] 表情回应 {reaction} 失败（忽略）: {exc}")
 
 
-def failure_notice(exc: BaseException) -> str:
+def failure_notice(failure: ParseFailure) -> str:
     """解析失败时发给用户的一句话。
 
     Args:
-        exc: 捕获到的异常。
+        failure: 已分类的失败（调用方先 ``errors.translate``）。
 
     Returns:
         提示文案。
     """
-    failure = translate(exc)
     if failure.kind is ErrorKind.UNAVAILABLE:
         return "这个作品已经不可用了（可能被删了）。"
     if failure.kind is ErrorKind.TIMEOUT:
@@ -71,16 +70,16 @@ def failure_notice(exc: BaseException) -> str:
     return f"解析失败：{failure.detail}"
 
 
-def download_failed_notice(exc: BaseException) -> str:
+def download_failed_notice(failure: ParseFailure) -> str:
     """下载失败时发给用户的一句话。
 
     Args:
-        exc: 捕获到的异常。
+        failure: 已分类的失败（调用方先 ``errors.translate``）。
 
     Returns:
         提示文案。
     """
-    return f"下载失败：{short_error(exc)}"
+    return f"下载失败：{failure.detail}"
 
 
 def internal_error_notice() -> str:
@@ -180,15 +179,13 @@ def audio_av_hint() -> str:
     return "不支持 AV 号，请发 BV 号或视频链接。"
 
 
-def audio_failed_notice(exc: BaseException) -> str:
+def audio_failed_notice(failure: ParseFailure) -> str:
     """音频获取 / 下载失败时的一句话。
 
     Args:
-        exc: 抛出的异常。
+        failure: 已分类的失败（调用方先 ``errors.translate``）。
 
     Returns:
         压平后的提示。
     """
-    from .errors import short_error
-
-    return f"音频获取失败：{short_error(exc)}"
+    return f"音频获取失败：{failure.detail}"
