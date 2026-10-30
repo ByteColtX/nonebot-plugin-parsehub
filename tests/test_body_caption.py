@@ -69,6 +69,54 @@ async def test_titled_card_does_not_send_caption(
 
 
 @pytest.mark.asyncio
+async def test_missing_cover_logs_only_on_final_attempt(
+    plugin, instance, service, tmp_media: Path, monkeypatch
+) -> None:
+    """下载前没封面只是暂态，不能在日志里说「卡片跳过」。"""
+    image = tmp_media / "a.jpg"
+    image.write_bytes(b"image")
+    files = [
+        plugin.media.MediaFile(path=image, kind=plugin.media.MediaKind.IMAGE)
+    ]
+    parsed = _result()
+    seen: list[str] = []
+
+    class FakeLogger:
+        def info(self, message: str) -> None:
+            seen.append(message)
+
+        def debug(self, message: str) -> None:
+            seen.append(message)
+
+    async def no_cover(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(instance.cards, "render", no_cover)
+    monkeypatch.setattr(service.message, "logger", FakeLogger())
+
+    await service.message.send_card_or_text(
+        instance,
+        FakeBot(),
+        make_group_event("x"),
+        parsed,
+        [],
+        allow_text=False,
+    )
+    assert not any("卡片跳过" in message for message in seen)
+    assert any("下载后重试" in message for message in seen)
+
+    seen.clear()
+    await service.message.send_card_or_text(
+        instance,
+        FakeBot(),
+        make_group_event("x"),
+        parsed,
+        files,
+    )
+    assert any("卡片跳过" in message for message in seen)
+
+
+@pytest.mark.asyncio
 async def test_cached_body_caption_is_sent_after_card(
     instance, service, tmp_media: Path
 ) -> None:
