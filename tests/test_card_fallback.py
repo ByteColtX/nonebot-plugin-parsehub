@@ -45,14 +45,14 @@ def chain(card, monkeypatch):
     main = _StubFont("main")
     fallbacks = (_StubFont("fb1"), _StubFont("fb2"))
     monkeypatch.setattr(card.fonts, "_GLYPH_CACHE", {})
-    monkeypatch.setattr(card.layout, "_fallback_fonts", lambda _size: fallbacks)
+    monkeypatch.setattr(card.text, "fallback_fonts", lambda _size: fallbacks)
 
     table: dict[tuple[str, str], bool] = {}
 
     def has_glyph(font, text):
         return table.get((font.name, text), False)
 
-    monkeypatch.setattr(card.layout, "_has_glyph", has_glyph)
+    monkeypatch.setattr(card.text, "has_glyph", has_glyph)
     return main, fallbacks, table
 
 
@@ -62,7 +62,7 @@ def test_font_runs_picks_first_font_with_glyph(card, chain) -> None:
     table[("main", "汉")] = True
     table[("fb1", "˶")] = True
     table[("fb2", "⚈")] = True
-    runs = card.layout._font_runs("汉˶⚈汉", main)
+    runs = card.text.font_runs("汉˶⚈汉", main)
     assert runs == [("汉", main), ("˶", fb1), ("⚈", fb2), ("汉", main)]
 
 
@@ -73,7 +73,7 @@ def test_font_runs_merges_adjacent_same_font(card, chain) -> None:
         table[("main", ch)] = True
     table[("fb1", "˶")] = True
     table[("fb1", "˵")] = True
-    runs = card.layout._font_runs("汉字˶˵汉字", main)
+    runs = card.text.font_runs("汉字˶˵汉字", main)
     assert runs == [("汉字", main), ("˶˵", fb1), ("汉字", main)]
 
 
@@ -82,7 +82,7 @@ def test_font_runs_keeps_blank_with_main_font(card, chain) -> None:
     main, (fb1, _fb2), table = chain
     table[("main", "汉")] = True
     table[("fb1", " ")] = True  # 就算回退字体"有"空格，也不该被选中
-    runs = card.layout._font_runs("汉 汉", main)
+    runs = card.text.font_runs("汉 汉", main)
     assert runs == [("汉 汉", main)]
 
 
@@ -90,9 +90,9 @@ def test_font_runs_without_fallbacks_stays_main(card, monkeypatch) -> None:
     """没有回退字体时，缺字仍然交回主字体（会画成方块）。"""
     main = _StubFont("main")
     monkeypatch.setattr(card.fonts, "_GLYPH_CACHE", {})
-    monkeypatch.setattr(card.layout, "_fallback_fonts", lambda _size: ())
-    monkeypatch.setattr(card.layout, "_has_glyph", lambda _font, _text: False)
-    assert card.layout._font_runs("⚈", main) == [("⚈", main)]
+    monkeypatch.setattr(card.text, "fallback_fonts", lambda _size: ())
+    monkeypatch.setattr(card.text, "has_glyph", lambda _font, _text: False)
+    assert card.text.font_runs("⚈", main) == [("⚈", main)]
 
 
 def test_font_runs_emoji_font_without_glyph_falls_back(
@@ -103,15 +103,15 @@ def test_font_runs_emoji_font_without_glyph_falls_back(
     fb = _StubFont("fb")
     emoji = _StubFont("emoji")
     monkeypatch.setattr(card.fonts, "_GLYPH_CACHE", {})
-    monkeypatch.setattr(card.layout, "_fallback_fonts", lambda _size: (fb,))
-    monkeypatch.setattr(card.layout, "_emoji_strike_font", lambda: emoji)
+    monkeypatch.setattr(card.text, "fallback_fonts", lambda _size: (fb,))
+    monkeypatch.setattr(card.text, "emoji_strike_font", lambda: emoji)
     # ⚈ 落在 emoji 码点区间里，但 Twemoji 没有这个字形
     monkeypatch.setattr(
-        card.layout,
-        "_has_glyph",
+        card.text,
+        "has_glyph",
         lambda font, text: (font.name, text) == ("fb", "⚈"),
     )
-    assert card.layout._font_runs("⚈", main, emoji_size=40) == [("⚈", fb)]
+    assert card.text.font_runs("⚈", main, emoji_size=40) == [("⚈", fb)]
 
 
 def test_font_runs_emoji_font_with_glyph_wins(card, monkeypatch) -> None:
@@ -119,12 +119,12 @@ def test_font_runs_emoji_font_with_glyph_wins(card, monkeypatch) -> None:
     main = _StubFont("main")
     emoji = _StubFont("emoji")
     monkeypatch.setattr(card.fonts, "_GLYPH_CACHE", {})
-    monkeypatch.setattr(card.layout, "_fallback_fonts", lambda _size: ())
-    monkeypatch.setattr(card.layout, "_emoji_strike_font", lambda: emoji)
+    monkeypatch.setattr(card.text, "fallback_fonts", lambda _size: ())
+    monkeypatch.setattr(card.text, "emoji_strike_font", lambda: emoji)
     monkeypatch.setattr(
-        card.layout, "_has_glyph", lambda font, text: font.name == "emoji"
+        card.text, "has_glyph", lambda font, text: font.name == "emoji"
     )
-    assert card.layout._font_runs("🍧", main, emoji_size=40) == [("🍧", None)]
+    assert card.text.font_runs("🍧", main, emoji_size=40) == [("🍧", None)]
 
 
 def test_advance_uses_the_font_that_draws(card, chain) -> None:
@@ -134,7 +134,7 @@ def test_advance_uses_the_font_that_draws(card, chain) -> None:
     fb1.advance = 4.0
     table[("main", "汉")] = True
     table[("fb1", "˶")] = True
-    assert card.layout._advance("汉˶汉", main) == 24.0
+    assert card.text.advance("汉˶汉", main) == 24.0
 
 
 def test_ensure_fallback_fonts_skips_failed_download(

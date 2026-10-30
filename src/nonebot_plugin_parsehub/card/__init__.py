@@ -6,11 +6,13 @@
 把字体获取、封面获取、版式绘制串起来，并统一兜底：任何一步失败都返回 ``None``，
 由调用方退回纯文字，而不是让解析白做。
 
-内部按职责拆成三个子模块：
+内部按职责拆成五个子模块：
 
 - :mod:`fonts`：字体来源、sha256 校验、emoji / 回退字体；
 - :mod:`cover`：封面三级兜底（thumb_url → 图片媒体 → 视频抽帧）；
-- :mod:`layout`：版式、折行、绘制与渲染。
+- :mod:`text`：emoji 切分、字形链、折行与绘制；
+- :mod:`compose`：渐变遮罩与平台 logo 处理；
+- :mod:`layout`：版式与渲染。
 """
 
 from __future__ import annotations
@@ -22,80 +24,9 @@ from typing import Any
 
 from nonebot import logger
 
-from ..platforms import PLATFORMS
 from . import cover, fonts, layout
-from .cover import fetch_cover
-from .fonts import (
-    EMOJI_FONT_NAME,
-    EMOJI_FONT_SOURCES,
-    FALLBACK_FONTS,
-    FONT_NAME,
-    FONT_SOURCES,
-    FontSource,
-    ensure_emoji_font,
-    ensure_fallback_fonts,
-    ensure_font,
-    set_font,
-)
-from .layout import (
-    INSET,
-    KICKER_SIZE,
-    LOGO_HEIGHT,
-    MAX_RATIO,
-    META_SIZE,
-    MIN_RATIO,
-    TITLE_SIZE,
-    TYPE_LABELS,
-    WIDTH,
-    available,
-    draw_text,
-    fit_title,
-    format_duration,
-    meta_line,
-    platform_of,
-    platform_uses_milliseconds,
-    render,
-    video_seconds,
-    wrap,
-)
 
-__all__ = [
-    "EMOJI_FONT_NAME",
-    "EMOJI_FONT_SOURCES",
-    "FALLBACK_FONTS",
-    "FONT_NAME",
-    "FONT_SOURCES",
-    "INSET",
-    "KICKER_SIZE",
-    "LOGO_HEIGHT",
-    "MAX_RATIO",
-    "META_SIZE",
-    "MIN_RATIO",
-    "PLATFORMS",
-    "TITLE_SIZE",
-    "TYPE_LABELS",
-    "WIDTH",
-    "CardRenderer",
-    "FontSource",
-    "available",
-    "cover",
-    "draw_text",
-    "ensure_emoji_font",
-    "ensure_fallback_fonts",
-    "ensure_font",
-    "fetch_cover",
-    "fit_title",
-    "fonts",
-    "format_duration",
-    "layout",
-    "meta_line",
-    "platform_of",
-    "platform_uses_milliseconds",
-    "render",
-    "set_font",
-    "video_seconds",
-    "wrap",
-]
+__all__ = ["CardRenderer"]
 
 
 class CardRenderer:
