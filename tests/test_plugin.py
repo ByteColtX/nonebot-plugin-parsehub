@@ -1129,7 +1129,7 @@ async def test_handle_link_single_media_no_forward(
 
 
 @pytest.mark.asyncio
-async def test_handle_link_video_failure_does_not_fallback(
+async def test_handle_link_video_failure_falls_back_to_file(
     plugin, monkeypatch, tmp_media, instance, service, media_mod
 ):
     video = tmp_media / "v.mp4"
@@ -1157,7 +1157,7 @@ async def test_handle_link_video_failure_does_not_fallback(
     )
 
     bot = FakeBot(fail_video=True)  # video 消息段被协议端拒绝
-    await service.handle(
+    result = await service.handle(
         instance,
         bot,
         make_group_event("https://b23.tv/abcd"),
@@ -1165,12 +1165,14 @@ async def test_handle_link_video_failure_does_not_fallback(
     )
 
     apis = [api for api, _ in bot.calls]
-    assert "upload_group_file" not in apis, "不应该回退群文件"
-    assert any("视频发送失败" in t for t in bot.sent_texts), bot.sent_texts
+    assert "upload_group_file" in apis, "video 段被拒时应回退群文件"
+    assert not any("视频发送失败" in t for t in bot.sent_texts), bot.sent_texts
+    assert result.outcome is service.Outcome.DELIVERED
+    assert result.report is not None and result.report.ok
     emojis = [
         kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
     ]
-    assert plugin.feedback.Reaction.FAIL in emojis, emojis  # 失败要回应失败表情
+    assert plugin.feedback.Reaction.OK in emojis, emojis
 
 
 @pytest.mark.asyncio
