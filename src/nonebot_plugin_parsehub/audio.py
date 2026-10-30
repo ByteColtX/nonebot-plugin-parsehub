@@ -594,13 +594,13 @@ def youtube_audio(
     except ValueError as exc:
         raise RuntimeError("yt-dlp 返回的不是 JSON") from exc
 
-    if data.get("live_status") in ("is_live", "is_upcoming", "was_live"):
-        raise RuntimeError("不支持直播")
     if data.get("_type") == "playlist":
         entries = data.get("entries") or []
         if not entries:
             raise RuntimeError("播放列表里没有视频")
         data = entries[0]
+    if data.get("live_status") in ("is_live", "is_upcoming", "was_live"):
+        raise RuntimeError("不支持直播")
 
     video_id = str(data.get("id") or "")
     if not video_id:

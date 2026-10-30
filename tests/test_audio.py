@@ -304,6 +304,35 @@ def test_youtube_audio_passes_bounded_timeout(plugin, monkeypatch):
     assert seen == [12, 0.1]
 
 
+def test_youtube_audio_playlist_live_entry_rejected(plugin, monkeypatch):
+    """播放列表先解包，再校验首条是否直播。"""
+
+    def fake_run(args, **kwargs):
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps(
+                {
+                    "_type": "playlist",
+                    "entries": [
+                        {
+                            "id": "x",
+                            "title": "t",
+                            "duration": 1,
+                            "webpage_url": "https://youtu.be/x",
+                            "live_status": "is_live",
+                        }
+                    ],
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(plugin.audio.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="直播"):
+        plugin.audio.youtube_audio("https://www.youtube.com/playlist?list=x")
+
+
 # --------------------------------------------------------------------------- #
 # 2. 文件名清洗
 # --------------------------------------------------------------------------- #
