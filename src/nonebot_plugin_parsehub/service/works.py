@@ -397,7 +397,7 @@ async def _download_and_deliver(
             keys=work.all_keys,
         )
 
-    # 上面没出成卡（封面得从视频里抽帧）就带上下载好的文件再试一次
+    # 上面没出成卡就带上下载好的文件再试一次：图片直读、视频抽帧
     if not info.sent:
         info = await message.send_card_or_text(
             app,
