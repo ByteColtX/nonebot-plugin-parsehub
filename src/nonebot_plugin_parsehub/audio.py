@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -422,6 +423,7 @@ def download_bilibili(
     dest: Path,
     proxy: str = "",
     max_bytes: int = 0,
+    timeout: float = 0,
 ) -> Path:
     """流式下载音频流到指定文件。
 
@@ -430,20 +432,25 @@ def download_bilibili(
         dest: 目标文件路径。
         proxy: 下载代理；空串表示直连。
         max_bytes: 体积上限（字节），0 表示不限；中途超过就中断。
+        timeout: 总超时（秒），0 表示不限；到点中断并关闭流。
 
     Returns:
         下载好的文件路径。
 
     Raises:
         AudioTooLarge: 下载中途超过体积上限。
-        RuntimeError: HTTP 失败或其他网络错误。
+        RuntimeError: HTTP 失败、总超时或其他网络错误。
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout if timeout > 0 else None
+    client_timeout = (
+        min(_HTTP_TIMEOUT, max(0.1, timeout)) if timeout > 0 else _HTTP_TIMEOUT
+    )
     received = 0
     try:
         with (
             httpx.Client(
-                timeout=_HTTP_TIMEOUT,
+                timeout=client_timeout,
                 follow_redirects=True,
                 proxy=proxy or None,
                 headers=_BILI_HEADERS,
@@ -454,6 +461,8 @@ def download_bilibili(
                 raise RuntimeError(f"音频下载失败：HTTP {response.status_code}")
             with dest.open("wb") as file:
                 for chunk in response.iter_bytes(1 << 16):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise RuntimeError("音频下载超时")
                     received += len(chunk)
                     if max_bytes and received > max_bytes:
                         raise AudioTooLarge()

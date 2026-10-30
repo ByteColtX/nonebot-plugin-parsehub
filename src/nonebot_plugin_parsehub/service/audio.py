@@ -86,7 +86,12 @@ async def _download_bilibili(
     async with budget.timeout():
         return Path(
             await asyncio.to_thread(
-                audio.download_bilibili, info.audio_url, dest, proxy, max_bytes
+                audio.download_bilibili,
+                info.audio_url,
+                dest,
+                proxy,
+                max_bytes,
+                max(0.1, budget.remaining),
             )
         )
 
