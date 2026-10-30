@@ -43,8 +43,8 @@ CARD_NAME = "card.jpg"
 META_NAME = "meta.json"
 TMP_DIR_NAME = ".tmp"
 
-# meta.json 的格式版本。2：正文帖卡片后补发正文，旧卡片需要重新渲染。
-META_SCHEMA = 2
+# meta.json 的格式版本。3：长正文与媒体合并转发，需记录正文是否在转发块里。
+META_SCHEMA = 3
 
 # 条目目录名的哈希长度（十六进制字符数）。
 _HASH_LENGTH = 20
@@ -61,7 +61,8 @@ class CacheEntry:
         root: 条目目录。
         files: 媒体文件（按文件名排序）。
         card: 卡片图路径；没有时为 None。
-        caption: 没出卡时发过的文字，或正文帖在卡片后补发的正文。
+        caption: 没出卡时发过的文字，或正文帖的正文。
+        caption_in_forward: caption 是否应放进合并转发、跟媒体一起发。
         seconds: 媒体时长（秒），0 表示未知。
         keys: 条目对应的所有作品 key。
     """
@@ -70,6 +71,7 @@ class CacheEntry:
     files: tuple[Path, ...]
     card: Path | None
     caption: str
+    caption_in_forward: bool
     seconds: int
     keys: tuple[str, ...]
 
@@ -204,6 +206,7 @@ class MediaCache:
             files=tuple(files),
             card=card if card.is_file() else None,
             caption=str(meta.get("caption") or ""),
+            caption_in_forward=bool(meta.get("caption_in_forward")),
             seconds=int(meta.get("seconds") or 0),
             keys=tuple(meta.get("keys") or ()),
         )
@@ -234,6 +237,7 @@ class MediaCache:
         *,
         card: Path | None = None,
         caption: str = "",
+        caption_in_forward: bool = False,
         seconds: int = 0,
     ) -> Path | None:
         """把一个作品存进缓存（多个 key 指向同一份文件）。
@@ -245,7 +249,8 @@ class MediaCache:
             keys: 作品 key，通常同时传「短链 key」和「解析后的 key」。
             files: 已下载到本地的媒体文件。
             card: 卡片图路径，没有就传 ``None``。
-            caption: 没出卡时发的文字，或正文帖在卡片后补发的正文。
+            caption: 没出卡时发的文字，或正文帖的正文。
+            caption_in_forward: caption 是否要在命中缓存时和媒体一起合并转发。
             seconds: 媒体的时长（秒），0 表示未知。
 
         Returns:
@@ -293,6 +298,7 @@ class MediaCache:
                 "schema": META_SCHEMA,
                 "keys": keys,
                 "caption": caption,
+                "caption_in_forward": bool(caption_in_forward),
                 "seconds": int(seconds),
                 "updated_at": time.time(),
             },

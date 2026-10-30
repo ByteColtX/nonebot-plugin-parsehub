@@ -82,6 +82,69 @@ WATCH_NAMES: dict[str, str] = {
     "wechat": "微信",
 }
 
+# 正文型平台：卡片只放得下标题摘要，正文必须跟资源一起进合并转发。
+# 这里只列「正文本身是内容主体」的平台；抖音 / 快手 / 皮皮虾这类短文案平台
+# 不列，避免每个视频都多一个转发块。富文本（richtext）无论平台都算长正文。
+LONG_BODY_PLATFORMS: frozenset[str] = frozenset(
+    {
+        "bangumi",
+        "coolapk",
+        "douban",
+        "facebook",
+        "instagram",
+        "medium",
+        "threads",
+        "tieba",
+        "toutiao",
+        "twitter",
+        "weibo",
+        "weixin",
+        "xhs",
+        "xiaohongshu",
+        "xiaoheihe",
+        "youtube",
+        "zhihu",
+        "zuiyou",
+    }
+)
+
+# 名单外的平台，正文超过这个长度也按长正文处理（B 站动态、未来新平台）。
+LONG_BODY_MIN_CHARS = 140
+
+
+def needs_body_forward(
+    platform_id: str,
+    post_type: str,
+    content: str,
+) -> bool:
+    """正文是否要和媒体一起走合并转发。
+
+    酷安、微博、知乎这类平台的正文可能长到卡片放不下；只把正文放在卡片里会
+    截断，单独发一条文字又和媒体分成两条消息。命中这些平台、富文本结果，或
+    正文本身够长时，调用方应把正文放进合并转发。
+
+    Args:
+        platform_id: ParseHub 的平台 id。
+        post_type: ParseHub 的帖子类型（video / image / richtext 等）。
+        content: 解析出的正文。
+
+    Returns:
+        需要把正文放进合并转发时返回 True。
+    """
+    text = (content or "").strip()
+    if not text:
+        return False
+    if post_type == "richtext":
+        return True
+    platform = normalise_platform(platform_id or "")
+    if platform in LONG_BODY_PLATFORMS:
+        return True
+    # B 站动态是 image 类型、正文在 content 里；普通视频简介不强行塞转发块。
+    if platform == "bilibili" and post_type == "image":
+        return True
+    return len(text) > LONG_BODY_MIN_CHARS
+
+
 # duration 单位上游各平台不统一：抖音 / 小红书 / 快手给的是毫秒，其它是秒。
 # 新平台要实测：下载媒体用 cv2 / ffprobe 量真实时长核对（TikTok 就是这样确认
 # 是秒的——报告 12，量出 12.20s，早先当毫秒会显示成 00:00；快手报告 11933，

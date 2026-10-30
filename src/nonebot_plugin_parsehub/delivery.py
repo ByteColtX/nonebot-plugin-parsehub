@@ -282,16 +282,20 @@ class Delivery:
         sender: Sender,
         event: MessageEvent,
         files: list[MediaFile],
+        *,
+        caption: str = "",
     ) -> MediaReport:
         """发送解析出的媒体文件。
 
         超过体积上限的文件直接跳过；多于一个文件时优先合并转发，失败或类型不合适
-        时退回逐条发送。失败记账在这里完成，调用方据此点表情。
+        时退回逐条发送。传了 ``caption``（长正文）时，正文作为第一个节点和媒体
+        一起合并转发；即使只有一个媒体也走转发，避免正文和资源拆成两条消息。
 
         Args:
             sender: 协议端接口。
             event: 触发消息事件。
             files: 待发送的本地媒体。
+            caption: 要和媒体一起合并转发的正文；空串表示不带正文。
 
         Returns:
             本次投递的结果。
@@ -307,6 +311,8 @@ class Delivery:
                 f"（{len(report.skipped)} 个媒体超过体积上限，已跳过）",
             )
         if not items:
+            if caption:
+                await self.send_text(sender, event, caption)
             return report
 
         # 兜底：缓存命中的路径不经过上层截断，这里再保证一次
@@ -333,11 +339,15 @@ class Delivery:
         if not items:
             return report
 
-        if len(items) > 1 and await self.send_forward(
-            sender, event, items, refs
+        if (len(items) > 1 or caption) and await self.send_forward(
+            sender, event, items, refs, caption=caption
         ):
             report.sent.extend(items)
             return report
+
+        if caption:
+            # 合并转发不可用：正文退回单独一条，媒体继续逐条发。
+            await self.send_text(sender, event, caption)
 
         for file, ref in zip(items, refs, strict=True):
             if await self._send_one(sender, event, file, ref):
@@ -461,14 +471,17 @@ class Delivery:
         event: MessageEvent,
         files: list[MediaFile],
         refs: list[str],
+        *,
+        caption: str = "",
     ) -> bool:
-        """把多个媒体合并成一条转发消息。
+        """把正文和媒体合并成一条转发消息。
 
         Args:
             sender: 协议端接口。
             event: 触发消息事件。
             files: 待发送的本地媒体。
             refs: 与 ``files`` 一一对应的引用（调用方只算一次）。
+            caption: 放在媒体前面的正文；空串表示只转发媒体。
 
         Returns:
             合并转发成功返回 True；媒体类型不适合转发时返回 False，由调用方改走
@@ -479,7 +492,21 @@ class Delivery:
             return False
         # 昵称直接取配置（没配就用 "ParseHub"），节点构造是纯内存活
         name = forward_node_name()
-        nodes = [
+        nodes: list[dict] = []
+        if caption:
+            nodes.append(
+                {
+                    "type": "node",
+                    "data": {
+                        "uin": str(sender.self_id),
+                        "name": name,
+                        "content": [
+                            {"type": "text", "data": {"text": caption}}
+                        ],
+                    },
+                }
+            )
+        nodes.extend(
             {
                 "type": "node",
                 "data": {
@@ -494,7 +521,7 @@ class Delivery:
                 },
             }
             for file, ref in zip(files, refs, strict=True)
-        ]
+        )
 
         timeout = max(1, self.settings.forward_timeout)
         started = time.monotonic()

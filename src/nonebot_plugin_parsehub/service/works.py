@@ -283,8 +283,15 @@ async def _apply_limits(
             f"[parsehub] 视频 {work.seconds}s 超过时长上限 "
             f"{settings.max_seconds}s，只发封面"
         )
+        body = message.forward_body(work.parsed, settings)
         await message.send_card_or_text(
-            app, sender, event, work.parsed, [], work.proxy
+            app,
+            sender,
+            event,
+            work.parsed,
+            [],
+            work.proxy,
+            caption=body or None,
         )
         watch = platforms.watch_name(work.platform_id, work.display)
         return Result.fail(
@@ -300,9 +307,16 @@ async def _apply_limits(
 
     work.total = len(work.refs)
     if not work.refs:
-        # 纯文字帖（比如 B 站动态）：没有媒体，只发卡片或文字
+        # 纯文字帖（比如 B 站动态）：没有资源可转发，卡片后补完整正文
+        body = message.forward_body(work.parsed, settings)
         await message.send_card_or_text(
-            app, sender, event, work.parsed, [], work.proxy
+            app,
+            sender,
+            event,
+            work.parsed,
+            [],
+            work.proxy,
+            caption=body or None,
         )
         return Result.fail(Outcome.NO_MEDIA, keys=work.all_keys)
 
@@ -337,6 +351,8 @@ async def _download_and_deliver(
 ) -> Result:
     """卡片与下载并行、投递、写缓存。"""
     assert work.budget is not None
+    # 长正文平台的正文不单独发，等下载完跟媒体一起放进合并转发。
+    body = message.forward_body(work.parsed, app.settings)
     # 两者互不依赖：让卡片渲染 + 上传的时间藏进（本来就慢的）下载里。
     download_task = (
         download.download_music(
@@ -349,11 +365,22 @@ async def _download_and_deliver(
     )
     info, (files, download_error) = await asyncio.gather(
         message.send_card_or_text(
-            app, sender, event, work.parsed, [], work.proxy, allow_text=False
+            app,
+            sender,
+            event,
+            work.parsed,
+            [],
+            work.proxy,
+            allow_text=False,
+            caption=body or None,
+            defer_caption=bool(body),
         ),
         download_task,
     )
     if files is None:
+        if body:
+            # 下载失败就没有转发块可挂正文，退回单独一条，别把正文吞掉。
+            await app.delivery.send_text(sender, event, body)
         if work.music and isinstance(download_error, audio.AudioTooLarge):
             return Result.fail(
                 Outcome.TOO_LARGE,
@@ -373,10 +400,17 @@ async def _download_and_deliver(
     # 上面没出成卡（封面得从视频里抽帧）就带上下载好的文件再试一次
     if not info.sent:
         info = await message.send_card_or_text(
-            app, sender, event, work.parsed, files, work.proxy
+            app,
+            sender,
+            event,
+            work.parsed,
+            files,
+            work.proxy,
+            caption=body or None,
+            defer_caption=bool(body),
         )
 
-    report = await app.delivery.send_media(sender, event, files)
+    report = await app.delivery.send_media(sender, event, files, caption=body)
     result = Result.delivered(report, work.all_keys)
     if work.total > MAX_MEDIA_ITEMS:
         # 截断提示走 notice，由统一的收尾逻辑发：媒体 → 提示 → 终态表情，
@@ -391,7 +425,8 @@ async def _download_and_deliver(
             work.all_keys,
             [file.path for file in report.sent],
             card=info.card,
-            caption=info.caption,
+            caption=info.caption or body,
+            caption_in_forward=bool(body),
             seconds=work.seconds,
         )
     return result
@@ -413,15 +448,21 @@ async def _deliver_cached(
 
     if settings.card_enabled and entry.card is not None:
         await app.delivery.send_card(sender, event, entry.card)
-    # caption 只会在「没出卡」或「无标题正文帖」时写入；两种都要发。卡片
-    # 成功时正文帖补的文字不会被这里吞掉。
-    if settings.send_text and entry.caption:
-        await app.delivery.send_text(sender, event, entry.caption)
+    # caption 只会在「没出卡」或「正文帖」时写入。长正文要和媒体一起进
+    # 转发块；其余情况仍是卡片后的独立文字。
+    caption = entry.caption if settings.send_text else ""
+    if caption and not entry.caption_in_forward:
+        await app.delivery.send_text(sender, event, caption)
 
     files = [
         MediaFile(path=path, kind=media.kind_of(path)) for path in entry.files
     ]
     logger.info(f"[parsehub] 命中媒体缓存，直接发送 {len(files)} 个文件")
-    report = await app.delivery.send_media(sender, event, files)
+    report = await app.delivery.send_media(
+        sender,
+        event,
+        files,
+        caption=caption if entry.caption_in_forward else "",
+    )
     all_keys = tuple(dict.fromkeys([key, *entry.keys]))
     return Result.delivered(report, all_keys, from_cache=True)
