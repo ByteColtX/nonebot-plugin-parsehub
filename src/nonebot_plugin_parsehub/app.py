@@ -82,7 +82,7 @@ class App:
         """
         cache_root = cache_dir or paths.cache_root()
         data_root = data_dir or paths.data_root()
-        relay = MediaRelay(relay_root or cache_root / paths.RELAY_DIR_NAME)
+        relay = MediaRelay(relay_root or paths.relay_root(cache_dir))
         endpoint = RelayEndpoint()
         return cls(
             settings=settings,

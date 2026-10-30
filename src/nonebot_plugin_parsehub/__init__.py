@@ -24,9 +24,55 @@ from __future__ import annotations
 from nonebot import get_driver
 from nonebot.plugin import PluginMetadata
 
-from . import triggers
+from . import (
+    audio,
+    bilibili,
+    bilibili_live,
+    budget,
+    cache,
+    card,
+    dedupe,
+    delivery,
+    errors,
+    feedback,
+    keys,
+    media,
+    parsehub_client,
+    paths,
+    platforms,
+    relay,
+    service,
+    switches,
+    triggers,
+)
 from .app import App
 from .config import Config, Settings, plugin_config
+
+__all__ = [
+    "APP",
+    "App",
+    "Config",
+    "Settings",
+    "audio",
+    "bilibili",
+    "bilibili_live",
+    "budget",
+    "cache",
+    "card",
+    "dedupe",
+    "delivery",
+    "errors",
+    "feedback",
+    "keys",
+    "media",
+    "parsehub_client",
+    "paths",
+    "platforms",
+    "relay",
+    "service",
+    "switches",
+    "triggers",
+]
 
 __plugin_meta__ = PluginMetadata(
     name="轻量、异步、开箱即用的社交媒体聚合解析插件",

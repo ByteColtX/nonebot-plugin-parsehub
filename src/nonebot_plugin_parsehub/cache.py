@@ -102,6 +102,25 @@ def _remove(path: Path) -> None:
         logger.warning(f"[parsehub] 缓存条目删除失败 {path}: {exc}")
 
 
+def _entry_bytes(entry: Path) -> int:
+    """一个条目目录里所有文件的大小之和。
+
+    Args:
+        entry: 条目目录。
+
+    Returns:
+        字节数；读不到的文件按 0 计。
+    """
+    total = 0
+    for item in entry.rglob("*"):
+        try:
+            if item.is_file():
+                total += item.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
 class MediaCache:
     """作品级的媒体缓存。
 
@@ -307,6 +326,9 @@ class MediaCache:
     def sweep(self) -> int:
         """删掉过期条目与写入残留，再按容量上限淘汰最久没用过的。
 
+        容量淘汰只载入一次各条目的大小，循环里删最旧、减总量，不再每删一条
+        就全树重算一遍。
+
         Returns:
             删掉的条目数量。
         """
@@ -315,16 +337,20 @@ class MediaCache:
         removed = self._drop_broken_aliases()
         removed += self._drop_stale_tmp()
         now = time.time()
-        for entry, updated_at in self._entries():
+        entries = self._entries()
+        for entry, updated_at in entries:
             if now - updated_at > self.ttl_seconds:
                 _remove(entry)
                 removed += 1
         if self.max_bytes > 0:
-            while True:
-                entries = self._entries()
-                if not entries or self.total_bytes() <= self.max_bytes:
+            alive = [(entry, _at) for entry, _at in entries if entry.exists()]
+            sizes = {entry: _entry_bytes(entry) for entry, _ in alive}
+            total = sum(sizes.values())
+            for entry, _updated_at in alive:
+                if total <= self.max_bytes:
                     break
-                _remove(entries[0][0])
+                total -= sizes[entry]
+                _remove(entry)
                 removed += 1
         return removed
 
@@ -334,15 +360,7 @@ class MediaCache:
         Returns:
             所有条目加起来的大小。
         """
-        total = 0
-        for entry, _updated_at in self._entries():
-            for item in entry.rglob("*"):
-                try:
-                    if item.is_file():
-                        total += item.stat().st_size
-                except OSError:
-                    continue
-        return total
+        return sum(_entry_bytes(entry) for entry, _ in self._entries())
 
     # ---- 内部 ----
 
