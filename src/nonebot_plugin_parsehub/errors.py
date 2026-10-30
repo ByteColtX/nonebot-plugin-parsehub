@@ -13,6 +13,7 @@ ParseHub 的异常类型很多，而且 import 代价高（会拉起 numpy / ope
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 
 import httpx
@@ -22,6 +23,9 @@ MAX_ERROR_CHARS = 80
 
 # ParseHub 的错误信息套了好几层「下载错误: 下载失败: …」，发给用户前压平。
 _NOISE = ("下载错误", "下载失败", "解析错误", "下载超时")
+
+# 用户可见的错误不暴露服务器本地路径（PIL 等异常会带绝对路径）。
+_QUOTED_PATH = re.compile(r"(['\"])(?:[A-Za-z]:)?[\\/][^'\"]*\1")
 
 
 class ErrorKind(StrEnum):
@@ -77,6 +81,9 @@ def short_error(exc: BaseException) -> str:
     text = text.strip()
     if not text:
         return type(exc).__name__
+    # PIL 的原始报错既带英文又带缓存绝对路径，换成人话。
+    if "cannot identify image file" in text.lower():
+        return "下载到的文件不是有效图片"
     # 2.3.10 起「所有解析方式均失败」会把每一层的原因列成多行，QQ 里发不出去，
     # 压成「一句话（第一层原因）」。
     lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -84,6 +91,7 @@ def short_error(exc: BaseException) -> str:
         head = lines[0].rstrip(":：")
         first = lines[1].lstrip("-").strip()
         text = f"{head}（{first}）" if first else head
+    text = _QUOTED_PATH.sub(r"\1<本地路径>\1", text)
     return _truncate_error(text)
 
 

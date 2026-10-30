@@ -9,6 +9,7 @@ matcher 级别的端到端测试见 test_nonebug.py。
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from fake import make_group_event
@@ -748,6 +749,17 @@ def test_short_error_strips_nested_prefixes(plugin, errors):
     assert errors.short_error(RuntimeError("")) == "RuntimeError"
 
 
+def test_short_error_hides_local_paths(plugin, errors):
+    """PIL 的报错带缓存绝对路径，不能原样发到群里。"""
+    exc = RuntimeError(
+        "cannot identify image file '/home/macy/.cache/parsehub/x.gif'"
+    )
+    assert errors.short_error(exc) == "下载到的文件不是有效图片"
+
+    generic = RuntimeError("打开失败: '/home/macy/.cache/parsehub/x.gif'")
+    assert "/home/macy" not in errors.short_error(generic)
+
+
 def test_short_error_flattens_fallback_error(plugin, errors):
     """2.3.10 的「所有解析方式均失败」是多行，QQ 里只能发一句话。"""
     exc = RuntimeError(
@@ -774,22 +786,43 @@ def test_content_unavailable_covers_fallback_variant(plugin, errors, feedback):
     )
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://g.us.sinaimg.cn/o0/x.mp4?label=gif_mp4", "mp4"),
+        ("https://wx1.sinaimg.cn/x.gif", "gif"),
+        ("https://example.test/no-extension", "gif"),
+    ],
+)
+def test_normalise_animated_ext(parsehub_client, url: str, expected: str):
+    """只按 URL 后缀纠正 GIF/MP4 错配，没后缀的不猜。"""
+    ref = FakeMediaRef(url, "gif")
+    parsehub_client._normalise_animated_ext(SimpleNamespace(media=[ref]))
+    assert ref.ext == expected
+
+
 @pytest.mark.asyncio
 async def test_download_uses_concurrency(
     tmp_media, monkeypatch, parsehub_client
 ):
     """下载要带上并发数，否则又退回逐张串行。"""
     seen: dict[str, object] = {}
+    parsed: dict[str, object] = {}
 
     class FakeResult:
+        media = [
+            FakeMediaRef("http://g.us.sinaimg.cn/o0/x.mp4?label=gif_mp4", "gif")
+        ]
+
         def download_sync(self, path, **kwargs):
             seen.update(kwargs)
+            seen["ext"] = self.media[0].ext
             return "parsed-ok"
 
     class FakeHub:
-        def download_sync(self, url, path, **kwargs):
-            seen.update(kwargs)
-            return "hub-ok"
+        def parse_sync(self, url, **kwargs):
+            parsed.update(kwargs)
+            return FakeResult()
 
     # conftest 会把 CLIENT.download_parsed 换成一个委托，这里要考真实现，
     # 所以直接调类上的方法。
@@ -805,12 +838,15 @@ async def test_download_uses_concurrency(
         == "parsed-ok"
     )
     assert seen["concurrency"] == parsehub_client.DOWNLOAD_CONCURRENCY > 1
+    assert seen["ext"] == "mp4", "微博 GIF 实际是 mp4，下载前要改后缀"
 
     seen.clear()
     assert await parsehub_client.ParseHubClient.download(
         client, "u", str(tmp_media)
-    ) == ("hub-ok")
+    ) == ("parsed-ok")
+    assert parsed["proxy"] is None
     assert seen["concurrency"] == parsehub_client.DOWNLOAD_CONCURRENCY
+    assert seen["ext"] == "mp4"
 
 
 def _patch_failing_download(
