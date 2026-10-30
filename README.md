@@ -20,7 +20,7 @@
 
 > 仅支持 **OneBot v11** 适配器（NapCat / SnowLuma / LuckyLilliaBot 等）。
 
-- **自动解析**：发链接、分享文案或 BV 号即可，支持 B 站 / 抖音 / 小红书 / 微博 等 24 个平台（`/解析平台` 查全量）
+- **自动解析**：发链接、分享文案或 BV 号即可，支持 B 站 / 抖音 / 小红书 / 微博 等 21 个平台（`/解析平台` 查全量）
 - **信息卡片**：先发卡片、再发视频 / 图集；多个媒体或长正文平台的正文与资源合并成一条转发
 - **直播间封面卡片**：B 站直播间（含 b23 短链）发一张封面——直播中取当前画面帧，未开播取静态封面
 - **音频提取**：`bm` / `ym` 下载 B 站 / YouTube 音频
@@ -77,7 +77,7 @@ plugins = ["nonebot_plugin_parsehub"]
 | `PARSEHUB_DEDUPE_SECONDS` | 否 | `120` | 同一会话内同一链接的去重窗口（秒），`0` = 不去重 |
 | `PARSEHUB_CONCURRENCY` | 否 | `2` | 同时处理的任务数 |
 | `PARSEHUB_PROXY` | 否 | 无 | 解析 / 下载代理，如 `http://127.0.0.1:7890` |
-| `PARSEHUB_PROXY_PLATFORMS` | 否 | 海外 8 平台 | 只对这些平台走代理，留空 = 全部走（列表要用合法 JSON） |
+| `PARSEHUB_PROXY_PLATFORMS` | 否 | 海外 6 平台 | 只对这些平台走代理，留空 = 全部走（列表要用合法 JSON） |
 | `PARSEHUB_COOKIE` | 否 | 无 | 兜底 cookie（优先读 parsehub 自己的 `cookies.toml`） |
 | `PARSEHUB_TIMEOUT` | 否 | `180` | 解析 + 下载总超时（秒） |
 | `PARSEHUB_CACHE_TTL_HOURS` | 否 | `24` | 媒体缓存保留小时数，命中就直接发本地那份；`0` = 关闭缓存 |

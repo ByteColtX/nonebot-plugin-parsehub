@@ -30,11 +30,8 @@ from .bilibili import (
 # 预筛白名单：只认这些域名后缀（含子域名）。
 ALLOWED_HOSTS: tuple[str, ...] = (
     "b23.tv",
-    "bangumi.tv",
-    "bgm.tv",
     "bili2233.cn",
     "bilibili.com",
-    "chii.in",
     "chenzhongtech.com",
     "coolapk.com",
     "douban.com",
@@ -47,9 +44,6 @@ ALLOWED_HOSTS: tuple[str, ...] = (
     "instagram.com",
     "izuiyou.com",
     "kuaishou.com",
-    "medium.com",
-    "xiaochuankeji.cn",
-    "snapchat.com",
     "threads.com",
     "tieba.baidu.com",
     "tiktok.com",
@@ -59,6 +53,7 @@ ALLOWED_HOSTS: tuple[str, ...] = (
     "weibo.com",
     "weixin.qq.com",
     "x.com",
+    "xiaochuankeji.cn",
     "xiaoheihe.cn",
     "xiaohongshu.com",
     "xhslink.cn",
@@ -85,12 +80,6 @@ _URL_SHAPES: tuple[re.Pattern[str], ...] = (
     ),
     # B 站直播间（插件自己处理，上游不支持）
     re.compile(r"^https?://live\.bilibili\.com/\d+", re.IGNORECASE),
-    # Bangumi / bgm.tv / chii.in
-    re.compile(
-        r"^https?://(www\.)?(bgm\.tv|bangumi\.tv|chii\.in)/"
-        r"(subject/topic|group/topic|rakuen/topic/(subject|group)|blog)/\d+",
-        re.IGNORECASE,
-    ),
     # 酷安动态 / 图片
     re.compile(r"^https?://www\.coolapk\.com/(feed|picture)/", re.IGNORECASE),
     # 豆瓣话题 / 分享跳转
@@ -122,20 +111,8 @@ _URL_SHAPES: tuple[re.Pattern[str], ...] = (
         r"(kuaishou|chenzhongtech)\.com/.+",
         re.IGNORECASE,
     ),
-    # Medium 文章
-    re.compile(
-        r"^https?://([\w-]+\.)?medium\.com/(.+/)?"
-        r"([^/?#]*-)?[0-9a-f]{8,12}(/|\?|#|$)",
-        re.IGNORECASE,
-    ),
     # 皮皮虾
     re.compile(r"^https?://h5\.pipix\.com/(s|ppx/item)/.+", re.IGNORECASE),
-    # Snapchat
-    re.compile(
-        r"^https?://(www\.)?snapchat\.com/@([a-zA-Z0-9._-]+)"
-        r"(/spotlight)?/([a-zA-Z0-9_-]+)",
-        re.IGNORECASE,
-    ),
     # Threads
     re.compile(
         r"^https?://[^/]*threads\.com/(@[\w.]+/post|share)/",

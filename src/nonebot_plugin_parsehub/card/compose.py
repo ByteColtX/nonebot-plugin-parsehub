@@ -96,7 +96,7 @@ def logo(slug: str, height: int) -> Any:  # PIL Image
 def is_dark(image: Any) -> bool:  # PIL Image
     """判断 logo 是否要转成白色剪影。
 
-    只有「偏暗且基本没有颜色」的标才转白：X、Threads、Medium 这类纯黑标在深色
+    只有「偏暗且基本没有颜色」的标才转白：X、Threads 这类纯黑标在深色
     封面上会消失，必须转白；而抖音的青红、微博的红、YouTube 的红这些带品牌色的
     标，转白会把品牌色抹掉，所以只要颜色够多就保留原色。
 
