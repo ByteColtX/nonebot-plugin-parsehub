@@ -7,9 +7,10 @@ ffmpeg 只把媒体直链当输入、不给输出文件：读到 MP4 的 moov �
 ``Duration:`` 就退出。全程不落盘，也不拉完整文件——实测视频号 2~9MB 的
 视频每次只取 0.24~0.34MB（容器头），耗时 0.1~0.2s。
 
-视频号上游（元宝 ``get_parse_result`` 与 ``get_feed_info``）都没有 duration
-字段，解析结果的 ``VideoRef.duration`` 恒为 0，只能这样补。其它平台偶发
-duration 为 0 时走同一套兜底，调用方只对视频引用触发。
+视频号（元宝 ``get_parse_result`` 与 ``get_feed_info``）和 Threads 上游都
+没有 duration 字段，解析结果的 ``VideoRef.duration`` 恒为 0，只能这样补。
+Instagram / 最右自 ParseHub 2.3.17 起由上游返回时长；其它平台偶发 0 时仍走
+同一套兜底，调用方只对视频引用触发。
 """
 
 from __future__ import annotations

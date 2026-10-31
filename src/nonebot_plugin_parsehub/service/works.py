@@ -324,7 +324,7 @@ async def _apply_limits(
     """时长上限、缓存二次命中、无媒体与数量截断；继续时返回 ``None``。"""
     settings = app.settings
 
-    # 上游没给 duration（视频号必现，其它平台偶发）时先把时长补出来，否则
+    # 上游没给 duration（视频号 / Threads 必现，其它平台偶发）时先补出来，否则
     # 上限永远不触发。只探视频引用，图片帖不会多花这次请求。
     video_refs = [ref for ref in work.refs if media.is_video_ref(ref)]
     if (

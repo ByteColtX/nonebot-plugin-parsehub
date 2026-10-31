@@ -86,7 +86,7 @@ src/nonebot_plugin_parsehub/
 - **配置启动时校验**：`Config` 用 pydantic 下界校验，`Settings` 是归一化只读快照。
 - **音频不设时长上限**：纯音频远小于视频，只按体积上限（`max_file_bytes`）；
   但取数与下载都吃操作超时预算（`PARSEHUB_TIMEOUT`），和常规视频下载同等待遇。
-- **没给时长时在下载前探测**：视频号必现（元宝 / feed 接口都不返回 duration，
+- **没给时长时在下载前探测**：视频号 / Threads 必现（接口不返回 duration，
   解析结果恒为 0），其它平台偶发；`service/duration` 用 ffmpeg 只读容器头
   （不给输出文件，不落盘、不拉完整文件，实测每次 <0.4MB、<0.5s）补出时长，
   再走统一上限。只探视频引用，图片帖不触发；探测失败按未知处理，照常下载
