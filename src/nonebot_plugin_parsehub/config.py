@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from nonebot import get_plugin_config
+from nonebot import get_driver, get_plugin_config
 from pydantic import BaseModel, Field
 
 from .platforms import OVERSEAS_PLATFORMS, normalise_platform
@@ -173,7 +173,7 @@ class Settings:
             concurrency=cfg.parsehub_concurrency,
             proxy=cfg.parsehub_proxy.strip(),
             proxy_platforms=frozenset(
-                item.strip().lower()
+                normalise_platform(item)
                 for item in cfg.parsehub_proxy_platforms
                 if item.strip()
             ),
@@ -211,7 +211,7 @@ class Settings:
         """
         if not self.allowed_platforms:
             return True
-        return platform_id.lower() in self.allowed_platforms
+        return normalise_platform(platform_id) in self.allowed_platforms
 
     def proxy_for(self, platform_id: str) -> str:
         """该平台要不要走代理。
@@ -226,10 +226,19 @@ class Settings:
             return ""
         if (
             self.proxy_platforms
-            and platform_id.lower() not in self.proxy_platforms
+            and normalise_platform(platform_id) not in self.proxy_platforms
         ):
             return ""
         return self.proxy
 
 
 plugin_config = get_plugin_config(Config)
+
+
+def forward_node_name() -> str:
+    """合并转发节点上显示的名字。
+
+    Returns:
+        已配置昵称里的任意一个；完全没配昵称时退回 ``"ParseHub"``。
+    """
+    return next(iter(get_driver().config.nickname), "ParseHub")

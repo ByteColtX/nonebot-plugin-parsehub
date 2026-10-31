@@ -43,8 +43,8 @@ CARD_NAME = "card.jpg"
 META_NAME = "meta.json"
 TMP_DIR_NAME = ".tmp"
 
-# meta.json 的格式版本。
-META_SCHEMA = 1
+# meta.json 的格式版本。3：长正文与媒体合并转发，需记录正文是否在转发块里。
+META_SCHEMA = 3
 
 # 条目目录名的哈希长度（十六进制字符数）。
 _HASH_LENGTH = 20
@@ -61,7 +61,8 @@ class CacheEntry:
         root: 条目目录。
         files: 媒体文件（按文件名排序）。
         card: 卡片图路径；没有时为 None。
-        caption: 没出卡时发过的文字。
+        caption: 没出卡时发过的文字，或正文帖的正文。
+        caption_in_forward: caption 是否应放进合并转发、跟媒体一起发。
         seconds: 媒体时长（秒），0 表示未知。
         keys: 条目对应的所有作品 key。
     """
@@ -70,6 +71,7 @@ class CacheEntry:
     files: tuple[Path, ...]
     card: Path | None
     caption: str
+    caption_in_forward: bool
     seconds: int
     keys: tuple[str, ...]
 
@@ -100,6 +102,25 @@ def _remove(path: Path) -> None:
             shutil.rmtree(path, ignore_errors=True)
     except OSError as exc:
         logger.warning(f"[parsehub] 缓存条目删除失败 {path}: {exc}")
+
+
+def _entry_bytes(entry: Path) -> int:
+    """一个条目目录里所有文件的大小之和。
+
+    Args:
+        entry: 条目目录。
+
+    Returns:
+        字节数；读不到的文件按 0 计。
+    """
+    total = 0
+    for item in entry.rglob("*"):
+        try:
+            if item.is_file():
+                total += item.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 class MediaCache:
@@ -169,6 +190,13 @@ class MediaCache:
         meta = self._read_meta(path)
         if meta is None:
             return None
+        # 旧版卡片可能没有正文；直接当未命中，让这次重新解析 / 渲染。
+        try:
+            schema = int(meta.get("schema") or 0)
+        except (TypeError, ValueError):
+            return None
+        if schema != META_SCHEMA:
+            return None
         if time.time() - float(meta.get("updated_at") or 0) > self.ttl_seconds:
             return None
         self._touch(path, meta)
@@ -178,6 +206,7 @@ class MediaCache:
             files=tuple(files),
             card=card if card.is_file() else None,
             caption=str(meta.get("caption") or ""),
+            caption_in_forward=bool(meta.get("caption_in_forward")),
             seconds=int(meta.get("seconds") or 0),
             keys=tuple(meta.get("keys") or ()),
         )
@@ -208,6 +237,7 @@ class MediaCache:
         *,
         card: Path | None = None,
         caption: str = "",
+        caption_in_forward: bool = False,
         seconds: int = 0,
     ) -> Path | None:
         """把一个作品存进缓存（多个 key 指向同一份文件）。
@@ -219,7 +249,8 @@ class MediaCache:
             keys: 作品 key，通常同时传「短链 key」和「解析后的 key」。
             files: 已下载到本地的媒体文件。
             card: 卡片图路径，没有就传 ``None``。
-            caption: 没出卡时发的文字。
+            caption: 没出卡时发的文字，或正文帖的正文。
+            caption_in_forward: caption 是否要在命中缓存时和媒体一起合并转发。
             seconds: 媒体的时长（秒），0 表示未知。
 
         Returns:
@@ -267,6 +298,7 @@ class MediaCache:
                 "schema": META_SCHEMA,
                 "keys": keys,
                 "caption": caption,
+                "caption_in_forward": bool(caption_in_forward),
                 "seconds": int(seconds),
                 "updated_at": time.time(),
             },
@@ -307,6 +339,9 @@ class MediaCache:
     def sweep(self) -> int:
         """删掉过期条目与写入残留，再按容量上限淘汰最久没用过的。
 
+        容量淘汰只载入一次各条目的大小，循环里删最旧、减总量，不再每删一条
+        就全树重算一遍。
+
         Returns:
             删掉的条目数量。
         """
@@ -315,16 +350,20 @@ class MediaCache:
         removed = self._drop_broken_aliases()
         removed += self._drop_stale_tmp()
         now = time.time()
-        for entry, updated_at in self._entries():
+        entries = self._entries()
+        for entry, updated_at in entries:
             if now - updated_at > self.ttl_seconds:
                 _remove(entry)
                 removed += 1
         if self.max_bytes > 0:
-            while True:
-                entries = self._entries()
-                if not entries or self.total_bytes() <= self.max_bytes:
+            alive = [(entry, _at) for entry, _at in entries if entry.exists()]
+            sizes = {entry: _entry_bytes(entry) for entry, _ in alive}
+            total = sum(sizes.values())
+            for entry, _updated_at in alive:
+                if total <= self.max_bytes:
                     break
-                _remove(entries[0][0])
+                total -= sizes[entry]
+                _remove(entry)
                 removed += 1
         return removed
 
@@ -334,15 +373,7 @@ class MediaCache:
         Returns:
             所有条目加起来的大小。
         """
-        total = 0
-        for entry, _updated_at in self._entries():
-            for item in entry.rglob("*"):
-                try:
-                    if item.is_file():
-                        total += item.stat().st_size
-                except OSError:
-                    continue
-        return total
+        return sum(_entry_bytes(entry) for entry, _ in self._entries())
 
     # ---- 内部 ----
 
@@ -445,7 +476,20 @@ class MediaCache:
             data = json.loads(path.read_text("utf-8"))
         except (OSError, ValueError):
             return None
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            return None
+        try:
+            float(data.get("updated_at") or 0)
+            int(data.get("seconds") or 0)
+        except (TypeError, ValueError):
+            return None
+        keys = data.get("keys")
+        if keys is not None and (
+            not isinstance(keys, (list, tuple))
+            or any(not isinstance(key, str) for key in keys)
+        ):
+            return None
+        return data
 
     def _write_meta(self, entry: Path, meta: dict) -> None:
         """原子写 meta.json。

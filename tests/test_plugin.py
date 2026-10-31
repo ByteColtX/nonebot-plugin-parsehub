@@ -9,112 +9,23 @@ matcher 级别的端到端测试见 test_nonebug.py。
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from fake import make_group_event
-from nonebot.adapters.onebot.v11 import (
-    Bot,
-    Message,
+from fakes import (
+    FakeBot,
+    FakeDownloadResult,
+    FakeMediaRef,
+    FakeParseResult,
 )
+from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from nonebot.adapters.onebot.v11.exception import ActionFailed
 
 
-class FakeBot(Bot):
-    """记录所有 API 调用的假 Bot。"""
-
-    def __init__(self, *, fail_video: bool = False) -> None:
-        super().__init__(adapter=MagicMock(), self_id="10000")
-        self.calls: list[tuple[str, dict]] = []
-        self.fail_video = fail_video
-
-    async def call_api(self, api: str, **kwargs):  # type: ignore[override]
-        self.calls.append((api, kwargs))
-        if self.fail_video and api == "send_msg":
-            message = kwargs.get("message")
-            if isinstance(message, Message) and any(
-                seg.type == "video" for seg in message
-            ):
-                raise ActionFailed(
-                    status="failed",
-                    retcode=100,
-                    data=None,
-                    message="video not supported",
-                )
-        return {"status": "ok", "retcode": 0, "data": None}
-
-    @property
-    def sent_texts(self) -> list[str]:
-        out = []
-        for api, kwargs in self.calls:
-            if api != "send_msg":
-                continue
-            message = kwargs.get("message")
-            if isinstance(message, Message):
-                out.append(message.extract_plain_text())
-        return out
-
-
-class FakeMediaRef:
-    def __init__(self, url: str, ext: str = "mp4") -> None:
-        self.url = url
-        self.ext = ext
-        self.width = 1920
-        self.height = 1080
-        self.duration = 10
-
-
-class FakeParseResult:
-    def __init__(
-        self,
-        *,
-        title="标题",
-        content="正文",
-        media=None,
-        raw_url="https://b23.tv/abcd",
-    ) -> None:
-        self.title = title
-        self.content = content
-        self.media = media
-        self.raw_url = raw_url
-        self.platform = SimpleNamespace(id="bilibili", display_name="哔哩哔哩")
-
-
-class FakeMediaFile:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.width = 1920
-        self.height = 1080
-        self.duration = 10
-
-
-class FakeDownloadResult:
-    def __init__(self, files: list[Path], media=None) -> None:
-        self.media = (
-            media if media is not None else [FakeMediaFile(p) for p in files]
-        )
-        self.output_dir = files[0].parent if files else Path("/tmp")
-
-
-@pytest.fixture()
-def tmp_media(tmp_path, monkeypatch, plugin, instance):
-    """把中转服务的根目录指到临时目录。"""
-    monkeypatch.setattr(instance.relay, "root", tmp_path)
-    monkeypatch.setattr(instance.endpoint, "host", "127.0.0.1")
-    monkeypatch.setattr(instance.endpoint, "port", 18899)
-    return tmp_path
-
-
 @pytest.fixture(autouse=True)
-def _reset_state(plugin, monkeypatch, instance):
+def _reset_state(plugin, instance):
     instance.dedupe._seen.clear()
-
-    async def _fake_platform_id(url):
-        return "bilibili"
-
-    monkeypatch.setattr(instance.client, "platform_id", _fake_platform_id)
     yield
     instance.dedupe._seen.clear()
 
@@ -210,17 +121,108 @@ def test_extract_urls_empty(plugin, keys):
     assert keys.extract_urls("今天天气不错，没有链接") == []
 
 
+def test_extract_urls_rejects_broad_homepages(plugin, keys):
+    """大站的首页 / 个人主页不再触发解析。"""
+    text = (
+        "首页 https://www.bilibili.com/ "
+        "微博 https://weibo.com/u/abc "
+        "频道 https://www.youtube.com/@someone "
+        "主页 https://www.tiktok.com/share/user/123"
+    )
+    assert keys.extract_urls(text) == []
+
+
+def test_extract_urls_ignores_removed_hosts(plugin, keys):
+    """上游不支持 / 只在特定子域支持的域名不再进白名单。"""
+    text = (
+        "https://fb.watch/abc "
+        "https://ixigua.com/abc "
+        "https://threads.net/abc "
+        "https://zuiyou.com/abc "
+        "https://pipix.com/abc "
+        "https://xiaochuankeji.cn/abc "
+        "https://bgm.tv/subject/topic/123 "
+        "https://medium.com/@user/some-article-abcdef123456 "
+        "https://www.snapchat.com/@user/abc123"
+    )
+    assert keys.extract_urls(text) == []
+
+
+def test_extract_urls_accepts_iesdouyin(plugin, keys):
+    """iesdouyin 仍是上游支持的抖音分享域名。"""
+    url = "https://www.iesdouyin.com/share/video/7695216850086505892"
+    assert keys.extract_urls(url) == [url]
+
+
+def test_extract_urls_accepts_new_supported_shapes(plugin, keys):
+    """补齐的域名和形状都能触发解析。"""
+    text = (
+        "动态 https://t.bilibili.com/123456789012345678 "
+        "专栏 https://www.bilibili.com/opus/123 "
+        "皮皮虾 https://h5.pipix.com/s/abc "
+        "最右 https://share.xiaochuankeji.cn/hybrid/share/post?pid=123 "
+        "最右短链 https://s.izuiyou.com/s/23BpI"
+    )
+    urls = keys.extract_urls(text)
+    assert urls == [
+        "https://t.bilibili.com/123456789012345678",
+        "https://www.bilibili.com/opus/123",
+        "https://h5.pipix.com/s/abc",
+        "https://share.xiaochuankeji.cn/hybrid/share/post?pid=123",
+        "https://s.izuiyou.com/s/23BpI",
+    ]
+
+
+def test_content_key_bilibili_opus_and_dynamic(plugin, keys):
+    """B 站专栏和动态也能归一成独立 key。"""
+    assert (
+        keys.content_key("https://www.bilibili.com/opus/123") == "bilibili:123"
+    )
+    assert (
+        keys.content_key("https://t.bilibili.com/123456789012345678")
+        == "bilibili:123456789012345678"
+    )
+
+
+def test_content_key_instagram_prefixed_paths(plugin, keys):
+    """Instagram 的 share / 任意前缀路径也能归一成同一个作品。"""
+    assert (
+        keys.content_key("https://www.instagram.com/share/p/abc")
+        == "instagram:abc"
+    )
+    assert (
+        keys.content_key("https://www.instagram.com/user/p/abc")
+        == "instagram:abc"
+    )
+
+
 # --------------------------------------------------------------------------- #
-# 1b. 裸 BV 号
+# 1b. 裸 BV / AV 号
 # --------------------------------------------------------------------------- #
 BV = "BV1xx411c7mD"
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
+AV = "av117528055514733"
+AV_BV = "BV1oxxY69Es4"
+AV_URL = f"https://www.bilibili.com/video/{AV_BV}"
 
 
 def test_extract_targets_bare_bv(plugin, keys):
     """只发作品号也能触发，拼成标准链接再交给 parsehub。"""
     assert keys.extract_targets(BV) == [BV_URL]
     assert keys.extract_targets(f"看这个 {BV} 好笑") == [BV_URL]
+
+
+def test_extract_targets_bare_av(plugin, keys):
+    """裸 AV 号同样触发，并换算成等价的 BV 链接。"""
+    assert keys.extract_targets(AV) == [AV_URL]
+    assert keys.extract_targets(f"看这个 {AV} 好笑") == [AV_URL]
+
+
+def test_extract_targets_av_boundaries(plugin, keys):
+    """贴字母的 av 串、以及普通链接里的 av 串都不算。"""
+    assert keys.extract_targets(f"x{AV}") == []
+    assert keys.extract_targets(f"{AV}x") == []
+    assert keys.extract_targets(f"https://example.com/{AV}") == []
 
 
 def test_extract_targets_skips_bv_inside_url(plugin, keys):
@@ -250,6 +252,18 @@ def test_bare_bv_shares_key_with_link(plugin, keys):
     assert keys.content_key(BV_URL) == f"bilibili:{BV.lower()}"
 
 
+def test_av_shares_key_with_bv(plugin, keys):
+    """AV 号与 BV 号指向同一个作品：去重和缓存都对齐。"""
+    bv_key = f"bilibili:{AV_BV.lower()}"
+    assert keys.content_key(AV_URL) == bv_key
+    assert keys.content_key(f"https://m.bilibili.com/video/{AV}") == bv_key
+    # 分P照样区分
+    assert keys.content_key(f"{AV_URL}?p=2") == f"{bv_key}:p2"
+    assert keys.content_key(f"{AV_URL}?p=2") == keys.content_key(
+        f"https://www.bilibili.com/video/{AV_BV}?p=2"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # 2. 自动触发规则
 # --------------------------------------------------------------------------- #
@@ -263,6 +277,13 @@ async def test_auto_rule_matches_group_link(plugin, instance, triggers):
 async def test_auto_rule_matches_bare_bv(plugin, instance, triggers):
     """消息里只有 BV 号也自动解析。"""
     event = make_group_event(BV)
+    assert await triggers.should_auto(instance, event) is True
+
+
+@pytest.mark.asyncio
+async def test_auto_rule_matches_bare_av(plugin, instance, triggers):
+    """消息里只有 AV 号也自动解析。"""
+    event = make_group_event(AV)
     assert await triggers.should_auto(instance, event) is True
 
 
@@ -377,12 +398,83 @@ def test_content_key_normalises_platform_ids(plugin, keys):
     )  # 短链只能等解析展开
 
 
+def test_content_key_zuiyou_and_xiaoheihe_share_ids(plugin, keys):
+    """最右 / 小黑盒的分享链接按作品 ID 归一，不能共用一个 key。"""
+    zuiyou_a = (
+        "https://share.xiaochuankeji.cn/hybrid/share/post"
+        "?pid=422153952&app=zuiyou"
+    )
+    zuiyou_b = (
+        "https://share.xiaochuankeji.cn/hybrid/share/post"
+        "?pid=426182135&app=zuiyou"
+    )
+    assert keys.content_key(zuiyou_a) == "zuiyou:422153952"
+    assert keys.content_key(zuiyou_b) == "zuiyou:426182135"
+    assert keys.content_key(zuiyou_a) != keys.content_key(zuiyou_b)
+    # 短链还没有 pid，至少要让两个短码各自成 key，不能都退化成同一个路径
+    assert keys.content_key("https://s.izuiyou.com/s/23BpI") == (
+        "s.izuiyou.com/s/23bpi"
+    )
+    assert keys.content_key("https://s.izuiyou.com/s/23BpI") != (
+        keys.content_key("https://s.izuiyou.com/s/23Bos")
+    )
+
+    xhh_a = (
+        "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=361771deb4c0"
+    )
+    xhh_b = (
+        "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=c31872bbe6e4"
+    )
+    assert keys.content_key(xhh_a) == "xiaoheihe:361771deb4c0"
+    assert keys.content_key(xhh_b) == "xiaoheihe:c31872bbe6e4"
+    assert keys.content_key(
+        "https://www.xiaoheihe.cn/app/bbs/link/361771deb4c0"
+    ) == keys.content_key(xhh_a)
+
+
+def test_content_key_douban_topics(plugin, keys):
+    """豆瓣 app 跳转链接要按 topic id 区分，不能都落到 dispatch 路径。"""
+    first = (
+        "https://www.douban.com/doubanapp/dispatch"
+        "?uri=%2Ftopic%2F503848885%3F_spm_id%3DMzgwNzg5OTQ"
+        "&_i=93340208406402e&dt_dapp=1"
+    )
+    second = (
+        "https://www.douban.com/doubanapp/dispatch"
+        "?uri=%2Ftopic%2F503145092%3F_spm_id%3DMTgxODg1MjY4"
+        "&_i=93340218406402e&dt_dapp=1"
+    )
+    assert keys.content_key(first) == "douban:503848885"
+    assert keys.content_key(second) == "douban:503145092"
+    assert keys.content_key(first) != keys.content_key(second)
+    assert keys.content_key(
+        "https://www.douban.com/group/topic/503848885/"
+    ) == keys.content_key(first)
+    assert keys.content_key(
+        "https://m.douban.com/doubanapp/dispatch"
+        "?uri=%2Fgroup%2Ftopic%2F503848885"
+    ) == keys.content_key(first)
+
+
 def test_content_key_falls_back_to_host_and_path(plugin, keys):
     """认不出 ID 的链接退化成「主机 + 路径」，丢掉查询串。"""
     key = keys.content_key("https://b23.tv/3XdwepO")
     assert key == "b23.tv/3xdwepo"
     assert keys.content_key("https://b23.tv/3XdwepO?share=1") == key
     assert keys.content_key("https://b23.tv/3XdwepO?p=2") == "b23.tv/3xdwepo:p2"
+
+
+def test_content_key_fold_case_covers_fallback(plugin, keys):
+    """fold_case 也要覆盖没有 ID pattern 的 fallback 路径。"""
+    lower = "https://www.youtube.com/shorts/aqz-KE-bpKQ"
+    upper = "https://www.youtube.com/shorts/AQZ-KE-BPKQ"
+    assert keys.content_key(lower) == keys.content_key(upper)
+    assert keys.content_key(lower, fold_case=False) != keys.content_key(
+        upper, fold_case=False
+    )
+    assert keys.content_key(
+        "https://b23.tv/AbCdEf", fold_case=False
+    ) != keys.content_key("https://b23.tv/abcDEF", fold_case=False)
 
 
 def test_dedupe_is_per_session(plugin, instance):
@@ -748,6 +840,17 @@ def test_short_error_strips_nested_prefixes(plugin, errors):
     assert errors.short_error(RuntimeError("")) == "RuntimeError"
 
 
+def test_short_error_hides_local_paths(plugin, errors):
+    """PIL 的报错带缓存绝对路径，不能原样发到群里。"""
+    exc = RuntimeError(
+        "cannot identify image file '/home/macy/.cache/parsehub/x.gif'"
+    )
+    assert errors.short_error(exc) == "下载到的文件不是有效图片"
+
+    generic = RuntimeError("打开失败: '/home/macy/.cache/parsehub/x.gif'")
+    assert "/home/macy" not in errors.short_error(generic)
+
+
 def test_short_error_flattens_fallback_error(plugin, errors):
     """2.3.10 的「所有解析方式均失败」是多行，QQ 里只能发一句话。"""
     exc = RuntimeError(
@@ -769,8 +872,24 @@ def test_content_unavailable_covers_fallback_variant(plugin, errors, feedback):
     exc = ContentUnavailableFallbackError([])
     assert errors.translate(exc).kind is errors.ErrorKind.UNAVAILABLE
     assert (
-        feedback.failure_notice(exc) == "这个作品已经不可用了（可能被删了）。"
+        feedback.failure_notice(errors.translate(exc))
+        == "这个作品已经不可用了（可能被删了）。"
     )
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://g.us.sinaimg.cn/o0/x.mp4?label=gif_mp4", "mp4"),
+        ("https://wx1.sinaimg.cn/x.gif", "gif"),
+        ("https://example.test/no-extension", "gif"),
+    ],
+)
+def test_normalise_animated_ext(parsehub_client, url: str, expected: str):
+    """只按 URL 后缀纠正 GIF/MP4 错配，没后缀的不猜。"""
+    ref = FakeMediaRef(url, "gif")
+    parsehub_client._normalise_animated_ext(SimpleNamespace(media=[ref]))
+    assert ref.ext == expected
 
 
 @pytest.mark.asyncio
@@ -779,16 +898,22 @@ async def test_download_uses_concurrency(
 ):
     """下载要带上并发数，否则又退回逐张串行。"""
     seen: dict[str, object] = {}
+    parsed: dict[str, object] = {}
 
     class FakeResult:
+        media = [
+            FakeMediaRef("http://g.us.sinaimg.cn/o0/x.mp4?label=gif_mp4", "gif")
+        ]
+
         def download_sync(self, path, **kwargs):
             seen.update(kwargs)
+            seen["ext"] = self.media[0].ext
             return "parsed-ok"
 
     class FakeHub:
-        def download_sync(self, url, path, **kwargs):
-            seen.update(kwargs)
-            return "hub-ok"
+        def parse_sync(self, url, **kwargs):
+            parsed.update(kwargs)
+            return FakeResult()
 
     # conftest 会把 CLIENT.download_parsed 换成一个委托，这里要考真实现，
     # 所以直接调类上的方法。
@@ -804,12 +929,15 @@ async def test_download_uses_concurrency(
         == "parsed-ok"
     )
     assert seen["concurrency"] == parsehub_client.DOWNLOAD_CONCURRENCY > 1
+    assert seen["ext"] == "mp4", "微博 GIF 实际是 mp4，下载前要改后缀"
 
     seen.clear()
     assert await parsehub_client.ParseHubClient.download(
         client, "u", str(tmp_media)
-    ) == ("hub-ok")
+    ) == ("parsed-ok")
+    assert parsed["proxy"] is None
     assert seen["concurrency"] == parsehub_client.DOWNLOAD_CONCURRENCY
+    assert seen["ext"] == "mp4"
 
 
 def _patch_failing_download(
@@ -853,7 +981,7 @@ async def test_download_retries_transient_cdn_error(
     _patch_failing_download(
         instance, monkeypatch, tmp_media, calls, failures=1, media_mod=media_mod
     )
-    monkeypatch.setattr(plugin.service, "DOWNLOAD_RETRY_DELAY", 0)
+    monkeypatch.setattr(plugin.service.download, "DOWNLOAD_RETRY_DELAY", 0)
 
     bot = FakeBot()
     url = "https://b23.tv/abcd"
@@ -878,13 +1006,13 @@ async def test_download_failure_after_retries_reports_short_error(
         failures=99,
         media_mod=media_mod,
     )
-    monkeypatch.setattr(plugin.service, "DOWNLOAD_RETRY_DELAY", 0)
+    monkeypatch.setattr(plugin.service.download, "DOWNLOAD_RETRY_DELAY", 0)
 
     bot = FakeBot()
     url = "https://b23.tv/abcd"
     await service.handle(instance, bot, make_group_event(url), url)
 
-    assert calls["download"] == service.DOWNLOAD_ATTEMPTS
+    assert calls["download"] == service.download.DOWNLOAD_ATTEMPTS
     texts = [text for text in bot.sent_texts if text]
     assert texts == ["下载失败：HTTP错误: 403"], texts
     # 下载失败也要给终点状态：先点「收到」，失败时补失败表情
@@ -1092,7 +1220,7 @@ async def test_handle_link_single_media_no_forward(
 
 
 @pytest.mark.asyncio
-async def test_handle_link_video_failure_does_not_fallback(
+async def test_handle_link_video_failure_falls_back_to_file(
     plugin, monkeypatch, tmp_media, instance, service, media_mod
 ):
     video = tmp_media / "v.mp4"
@@ -1120,7 +1248,7 @@ async def test_handle_link_video_failure_does_not_fallback(
     )
 
     bot = FakeBot(fail_video=True)  # video 消息段被协议端拒绝
-    await service.handle(
+    result = await service.handle(
         instance,
         bot,
         make_group_event("https://b23.tv/abcd"),
@@ -1128,12 +1256,14 @@ async def test_handle_link_video_failure_does_not_fallback(
     )
 
     apis = [api for api, _ in bot.calls]
-    assert "upload_group_file" not in apis, "不应该回退群文件"
-    assert any("视频发送失败" in t for t in bot.sent_texts), bot.sent_texts
+    assert "upload_group_file" in apis, "video 段被拒时应回退群文件"
+    assert not any("视频发送失败" in t for t in bot.sent_texts), bot.sent_texts
+    assert result.outcome is service.Outcome.DELIVERED
+    assert result.report is not None and result.report.ok
     emojis = [
         kw["emoji_id"] for api, kw in bot.calls if api == "set_msg_emoji_like"
     ]
-    assert plugin.feedback.Reaction.FAIL in emojis, emojis  # 失败要回应失败表情
+    assert plugin.feedback.Reaction.OK in emojis, emojis
 
 
 @pytest.mark.asyncio
@@ -1299,6 +1429,20 @@ def test_public_url_mapping(plugin, tmp_media, instance):
     )
 
 
+def test_public_url_mapping_encodes_special_names(plugin, tmp_media, instance):
+    """标题里的空格 / # / 中文必须做百分号编码，否则协议端取不到。"""
+    from urllib.parse import quote
+
+    sub = tmp_media / "deadbeef"
+    sub.mkdir()
+    f = sub / "2024 歌单#1.m4a"
+    f.write_bytes(b"1")
+    expected = "http://192.168.1.5:8899/" + quote(
+        "deadbeef/2024 歌单#1.m4a", safe="/"
+    )
+    assert instance.relay.url_for(f, "192.168.1.5", 8899) == expected
+
+
 def test_cleanup_removes_old_dirs(plugin, tmp_media, instance):
     old = tmp_media / "old"
     old.mkdir()
@@ -1309,6 +1453,24 @@ def test_cleanup_removes_old_dirs(plugin, tmp_media, instance):
     os.utime(old, (time.time() - 7200, time.time() - 7200))
     assert instance.relay.cleanup(60) == 1
     assert not old.exists()
+
+
+def test_sweep_tmp_removes_stale_cookie_files(tmp_path):
+    """崩溃残留的旧 cookie 文件会被清掉，新的保留。"""
+    from nonebot_plugin_parsehub.app import _sweep_tmp
+
+    old = tmp_path / "parsehub-yt-old.cookies"
+    new = tmp_path / "parsehub-yt-new.cookies"
+    old.write_text("secret", encoding="utf-8")
+    new.write_text("secret", encoding="utf-8")
+
+    import os
+    import time
+
+    os.utime(old, (time.time() - 7200, time.time() - 7200))
+    assert _sweep_tmp(tmp_path) == 1
+    assert not old.exists()
+    assert new.exists()
 
 
 @pytest.mark.asyncio
@@ -1458,7 +1620,7 @@ def _wire_download_paths(
         "probe_size",
         lambda url, timeout=15, proxy="": asyncio.sleep(0, result=1024),
     )
-    monkeypatch.setattr(plugin.service, "DOWNLOAD_RETRY_DELAY", 0)
+    monkeypatch.setattr(plugin.service.download, "DOWNLOAD_RETRY_DELAY", 0)
     return calls
 
 
@@ -1557,7 +1719,6 @@ async def test_card_and_download_run_in_parallel(
 
 def _card_event(payload: str):
     """造一条只含 json 卡片段的消息（QQ 小程序分享就是这个形态）。"""
-    from nonebot.adapters.onebot.v11 import MessageSegment
 
     event = make_group_event("")
     event.message = Message(
@@ -1654,10 +1815,10 @@ async def test_auto_rule_accepts_miniprogram_card(plugin, instance, triggers):
 async def test_handle_link_caps_media_items(
     plugin, monkeypatch, tmp_media, instance, media_mod, service
 ):
-    """媒体超过上限时只下载并发送前 20 个，并回一句提示。"""
+    """媒体超过硬上限时只下载前 100 个，并按批转发。"""
     total = media_mod.MAX_MEDIA_ITEMS + 10
     pics = []
-    for i in range(total):
+    for i in range(media_mod.MAX_MEDIA_ITEMS):
         p = tmp_media / f"p{i}.jpg"
         p.write_bytes(b"x" * 512)
         pics.append(p)
@@ -1674,7 +1835,7 @@ async def test_handle_link_caps_media_items(
         return result
 
     async def fake_download(res, path, proxy=""):
-        # 下载拿到的 result 必须已经截断过，否则 30 张图会全被拉下来
+        # 下载拿到的 result 必须已经截断过，否则 110 张图会全被拉下来
         seen["media"] = len(res.media)
         return FakeDownloadResult(pics[: len(res.media)])
 
@@ -1691,12 +1852,22 @@ async def test_handle_link_caps_media_items(
     await service.handle(instance, bot, make_group_event(url), url)
 
     assert seen["media"] == media_mod.MAX_MEDIA_ITEMS, seen
-    fwd = dict(bot.calls)["send_group_forward_msg"]
-    assert len(fwd["messages"]) == media_mod.MAX_MEDIA_ITEMS
+    forwards = [kw for api, kw in bot.calls if api == "send_group_forward_msg"]
+    chunk = media_mod.chunk_size(instance.settings.forward_timeout)
+    expected = [chunk] * (media_mod.MAX_MEDIA_ITEMS // chunk)
+    if media_mod.MAX_MEDIA_ITEMS % chunk:
+        expected.append(media_mod.MAX_MEDIA_ITEMS % chunk)
+    assert [len(fwd["messages"]) for fwd in forwards] == expected
+    assert sum(len(fwd["messages"]) for fwd in forwards) == (
+        media_mod.MAX_MEDIA_ITEMS
+    )
     texts = [
         str(kw.get("message", "")) for api, kw in bot.calls if api == "send_msg"
     ]
-    assert any("只发前 20 项" in t for t in texts), texts
+    assert any(f"作品共 {total} 项" in t for t in texts), texts
+    assert any(f"已发 {media_mod.MAX_MEDIA_ITEMS} 项" in t for t in texts), (
+        texts
+    )
 
 
 @pytest.mark.asyncio
@@ -1715,5 +1886,92 @@ async def test_send_media_files_caps_items(
     bot = FakeBot()
     await instance.delivery.send_media(bot, make_group_event("x"), files)
 
-    fwd = dict(bot.calls)["send_group_forward_msg"]
-    assert len(fwd["messages"]) == media_mod.MAX_MEDIA_ITEMS
+    forwards = [kw for api, kw in bot.calls if api == "send_group_forward_msg"]
+    chunk = media_mod.chunk_size(instance.settings.forward_timeout)
+    expected = [chunk] * (media_mod.MAX_MEDIA_ITEMS // chunk)
+    if media_mod.MAX_MEDIA_ITEMS % chunk:
+        expected.append(media_mod.MAX_MEDIA_ITEMS % chunk)
+    assert [len(fwd["messages"]) for fwd in forwards] == expected
+    assert sum(len(fwd["messages"]) for fwd in forwards) == (
+        media_mod.MAX_MEDIA_ITEMS
+    )
+
+
+def test_media_chunk_size(media_mod):
+    """批大小由转发超时推导；默认 60s 对应 20 项。"""
+    assert media_mod.chunk_size(60) == 20
+    assert media_mod.chunk_size(30) == 10
+    assert media_mod.chunk_size(1) == 1
+    assert media_mod.chunk_size(600) == media_mod.MAX_MEDIA_ITEMS
+
+
+@pytest.mark.asyncio
+async def test_send_media_forward_failure_only_affects_one_batch(
+    plugin, tmp_media, instance, media_mod
+):
+    """某一批转发失败时只对这一批逐条兜底，后续批次仍走转发。"""
+    chunk = media_mod.chunk_size(instance.settings.forward_timeout)
+    count = chunk + 3
+    files = []
+    for i in range(count):
+        p = tmp_media / f"f{i}.jpg"
+        p.write_bytes(b"x" * 512)
+        files.append(
+            media_mod.MediaFile(path=p, kind=media_mod.MediaKind.IMAGE)
+        )
+
+    class FailFirstForwardBot(FakeBot):
+        def __init__(self) -> None:
+            super().__init__()
+            self.forwards = 0
+
+        async def call_api(self, api: str, **kwargs):
+            if api == "send_group_forward_msg":
+                self.forwards += 1
+                if self.forwards == 1:
+                    self.calls.append((api, kwargs))
+                    raise ActionFailed(
+                        status="failed",
+                        retcode=1200,
+                        data=None,
+                        message="first forward rejected",
+                    )
+            return await super().call_api(api, **kwargs)
+
+    bot = FailFirstForwardBot()
+    report = await instance.delivery.send_media(
+        bot, make_group_event("x"), files
+    )
+
+    forwards = [kw for api, kw in bot.calls if api == "send_group_forward_msg"]
+    assert bot.forwards == 2, "两批都应该尝试转发"
+    assert len(bot.sent_images) == chunk, "第一批逐条兜底"
+    assert [len(fwd["messages"]) for fwd in forwards] == [
+        chunk,
+        count - chunk,
+    ], "第一批失败，第二批仍合并转发"
+    assert len(report.sent) == count
+
+
+@pytest.mark.asyncio
+async def test_multi_link_message_fans_out(
+    instance, matchers, triggers, monkeypatch
+) -> None:
+    """一条消息里的多个链接并发处理，先开始的不挡住后面的。"""
+    started: list[str] = []
+    gate = asyncio.Event()
+
+    async def fake_handle(app, bot, event, url, manual=False):
+        started.append(url)
+        if len(started) == 2:
+            gate.set()
+        await asyncio.wait_for(gate.wait(), 1)
+
+    monkeypatch.setattr(triggers, "handle", fake_handle)
+    event = make_group_event(
+        "https://b23.tv/aaaa https://b23.tv/bbbb", message_id=42
+    )
+
+    await matchers.auto.handlers[0].call(FakeBot(), event)
+
+    assert started == ["https://b23.tv/aaaa", "https://b23.tv/bbbb"]

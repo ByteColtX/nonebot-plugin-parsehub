@@ -47,10 +47,40 @@ VIDEO_EXTENSIONS = frozenset(
     }
 )
 
-# 一次最多发多少个媒体。图集动辄上百张，而每张都要等协议端上传到 QQ（实测约
-# 2s/张且串行），下载也慢：全发既会顶穿总超时，也会把合并转发拖到超时后逐条
-# 刷屏。超出部分直接不发，只发前 MAX_MEDIA_ITEMS 个。
-MAX_MEDIA_ITEMS = 20
+# 音频扩展名：按 record 语音段投递（bm / ym 指令用）。
+AUDIO_EXTENSIONS = frozenset(
+    {
+        ".aac",
+        ".flac",
+        ".m4a",
+        ".mp3",
+        ".ogg",
+        ".opus",
+        ".wav",
+        ".weba",
+    }
+)
+
+# 单个作品最多处理多少个媒体。图集动辄上百张，每张都要等协议端上传（实测约
+# 2s/张且串行）；超过 MAX_MEDIA_ITEMS 的部分不下载也不再发。发送时还要按
+# 单次合并转发的容量分批，见 :func:`chunk_size`。
+MAX_MEDIA_ITEMS = 100
+
+# 单张媒体的上传估算：实测约 2s，留一半余量给引用构造与协议端排队。
+_UPLOAD_SECONDS = 3.0
+
+
+def chunk_size(forward_timeout: float) -> int:
+    """一次合并转发最多放多少个媒体。
+
+    Args:
+        forward_timeout: 单次合并转发的超时秒数。
+
+    Returns:
+        至少 1，至多 :data:`MAX_MEDIA_ITEMS`。
+    """
+    return max(1, min(MAX_MEDIA_ITEMS, int(forward_timeout / _UPLOAD_SECONDS)))
+
 
 # 探测文件体积的超时（秒）。
 PROBE_TIMEOUT_SECONDS = 15.0
@@ -61,6 +91,7 @@ class MediaKind(StrEnum):
 
     IMAGE = "image"
     VIDEO = "video"
+    RECORD = "record"
     FILE = "file"
 
 
@@ -89,13 +120,11 @@ class MediaFile:
         path: 本地路径。
         kind: 投递方式。
         duration: 时长（秒），未知为 0。
-        live_photo: 是否来自实况照片的短视频。
     """
 
     path: Path
     kind: MediaKind
     duration: int = 0
-    live_photo: bool = False
 
 
 def kind_of(path: Path) -> MediaKind:
@@ -105,14 +134,28 @@ def kind_of(path: Path) -> MediaKind:
         path: 本地文件路径。
 
     Returns:
-        图片 / 视频 / 其他文件。
+        图片 / 视频 / 语音 / 其他文件。
     """
     suffix = path.suffix.lower()
     if suffix in IMAGE_EXTENSIONS:
         return MediaKind.IMAGE
     if suffix in VIDEO_EXTENSIONS:
         return MediaKind.VIDEO
+    if suffix in AUDIO_EXTENSIONS:
+        return MediaKind.RECORD
     return MediaKind.FILE
+
+
+def is_video_ref(ref: MediaRef) -> bool:
+    """远程引用是不是视频（按扩展名判断）。
+
+    Args:
+        ref: 解析结果里的远程媒体引用。
+
+    Returns:
+        扩展名属于视频集合时返回 True。
+    """
+    return bool(ref.ext) and f".{ref.ext}" in VIDEO_EXTENSIONS
 
 
 def _items(value: Any) -> list[Any]:  # parsehub 的结果对象
@@ -175,9 +218,7 @@ def files_from(downloaded: Any) -> list[MediaFile]:  # 下载结果
         video_path = getattr(item, "video_path", None)
         if video_path:
             video = Path(video_path)
-            files.append(
-                MediaFile(path=video, kind=MediaKind.VIDEO, live_photo=True)
-            )
+            files.append(MediaFile(path=video, kind=MediaKind.VIDEO))
     return files
 
 

@@ -20,14 +20,11 @@
 
 > 仅支持 **OneBot v11** 适配器（NapCat / SnowLuma / LuckyLilliaBot 等）。
 
-- **自动解析**：发链接、分享文案或 B 站 BV 号即可，也可用 `/解析` 命令手动触发
-- **按会话开关**：`解析开关` 控制某个群 / 私聊，超管和群管理可操作
-- **24 个平台**：Bilibili、抖音、小红书、微博、快手、知乎、贴吧、豆瓣、今日头条、微信公众号、微信视频号、酷安、皮皮虾、最右、小黑盒、Bangumi、X/Twitter、Instagram、YouTube、TikTok、Threads、Facebook、Snapchat、Medium
-- **卡片 + 媒体**：先发信息卡片，再发视频 / 图集；2 个以上媒体合并转发，单个作品最多 20 个
-- **实况照片**：图片和短视频一起发；视频走 `video` 消息段，不占群文件
-- **表情回应**：给触发消息点表情（收到 / 成功 / 失败），不引用原消息
-- **成本控制**：体积 / 时长上限、会话内去重、并发限制、临时文件自动清理
-- **缓存与投递**：同一作品 24 小时内直接发本地缓存；投递方式 `file` / `http` / `base64` 三选一
+- **自动解析**：发链接、分享文案或 BV / AV 号即可，支持 B 站 / 抖音 / 小红书 / 微博 等 21 个平台（`/解析平台` 查全量）
+- **信息卡片**：先发卡片、再发视频 / 图集；多个媒体或长正文平台的正文与资源合并成一条转发
+- **直播间封面卡片**：B 站直播间（含 b23 短链）发一张封面——直播中取当前画面帧，未开播取静态封面
+- **音频提取**：`bm` / `ym` 下载 B 站 / YouTube 音频
+- **表情回应**：收到 / 成功 / 失败贴在原消息上
 
 ## 🎨 效果图
 
@@ -80,17 +77,17 @@ plugins = ["nonebot_plugin_parsehub"]
 | `PARSEHUB_DEDUPE_SECONDS` | 否 | `120` | 同一会话内同一链接的去重窗口（秒），`0` = 不去重 |
 | `PARSEHUB_CONCURRENCY` | 否 | `2` | 同时处理的任务数 |
 | `PARSEHUB_PROXY` | 否 | 无 | 解析 / 下载代理，如 `http://127.0.0.1:7890` |
-| `PARSEHUB_PROXY_PLATFORMS` | 否 | 海外 8 平台 | 只对这些平台走代理，留空 = 全部走（列表要用合法 JSON） |
+| `PARSEHUB_PROXY_PLATFORMS` | 否 | 海外 6 平台 | 只对这些平台走代理，留空 = 全部走（列表要用合法 JSON） |
 | `PARSEHUB_COOKIE` | 否 | 无 | 兜底 cookie（优先读 parsehub 自己的 `cookies.toml`） |
 | `PARSEHUB_TIMEOUT` | 否 | `180` | 解析 + 下载总超时（秒） |
 | `PARSEHUB_CACHE_TTL_HOURS` | 否 | `24` | 媒体缓存保留小时数，命中就直接发本地那份；`0` = 关闭缓存 |
 | `PARSEHUB_CACHE_MAX_MB` | 否 | `1024` | 媒体缓存总容量上限（MB），超了按最久没用过的删 |
 | `PARSEHUB_CARD` | 否 | `true` | 是否发信息卡片图（失败自动退回文字） |
 | `PARSEHUB_CARD_FONT` | 否 | 无 | 中文字体路径，留空则自动找系统字体 / 下载 |
-| `PARSEHUB_FORWARD_TIMEOUT` | 否 | `60` | 合并转发等待协议端的秒数，超时才逐条发 |
+| `PARSEHUB_FORWARD_TIMEOUT` | 否 | `60` | 合并转发等待协议端的秒数，超时才逐条发；同时决定每批媒体数量（60s ≈ 20 项） |
 | `PARSEHUB_SEND_TEXT` | 否 | `true` | 是否发送标题 / 正文 |
 | `PARSEHUB_MAX_CHARS` | 否 | `300` | 正文最多发送多少字符 |
-| `PARSEHUB_FAIL_NOTICE` | 否 | `true` | 视频发送失败时是否额外发文字提示 |
+| `PARSEHUB_FAIL_NOTICE` | 否 | `true` | 媒体发送失败时是否额外发文字提示 |
 | `PARSEHUB_DELIVERY` | 否 | `file` | 媒体交给协议端：`file` = 本机路径（要求同机）/ `http` = 中转地址 / `base64` = 内容内联 |
 | `PARSEHUB_RELAY_HOST` | 否 | 无 | 中转服务对外地址，留空自动探测内网 IP（仅 `http` 模式） |
 | `PARSEHUB_RELAY_PORT` | 否 | `21473` | 中转服务端口（仅 `http` 模式） |
@@ -103,98 +100,56 @@ plugins = ["nonebot_plugin_parsehub"]
 
 需要登录态的平台（X、Instagram、TikTok、豆瓣、微信视频号 等），cookie 优先从 ParseHub 自己的配置读取
 （`ph set cookie <平台>`），也可以用 `PARSEHUB_COOKIE` 兜底。
+微信视频号必须用腾讯元宝（`yuanbao.tencent.com`）的登录 Cookie：
+`ph set cookie weixin_channels`。
 
 ## 🎉 使用
 
-### 指令表
+### 指令
 
-| 指令 | 权限 | 需要@ | 范围 | 说明 |
-| :---  | :---: | :---: | :---: | :--- |
-| `/解析 <链接、BV 号或分享文案>`（别名 `/ph`、`/解析链接`） | 群员 | 否 | 群聊/私聊 | 手动解析，不做去重拦截 |
-| `/解析平台` | 群员 | 否 | 群聊/私聊 | 列出支持的平台 |
-| `/解析开关 [开\|关]`、`/解析开`、`/解析关` | 主人/群管 | 否 | 群聊/私聊 | 按会话开关解析（私聊仅主人） |
-| `/解析状态` | 群员 | 否 | 群聊/私聊 | 查看当前会话的开关状态 |
+| 指令 | 权限 | 说明 |
+| :--- | :--- | :--- |
+| `/解析 <链接、BV / AV 号或分享文案>`（别名 `/ph`、`/解析链接`） | 群员 | 手动解析，不做去重拦截 |
+| `/bm <BV / AV 号或 B 站链接>` | 群员 | 下载 B 站视频音频，发 record 语音（`-f` 以文件发送） |
+| `/ym <YouTube 链接或视频 ID>` | 群员 | 下载 YouTube 视频音频，发 record 语音（`-f` 以文件发送） |
+| `/解析平台` | 群员 | 列出支持的平台 |
+| `/解析开关 [开\|关]`、`/解析开`、`/解析关` | 主人/群管 | 按会话开关解析（私聊仅主人） |
+| `/解析状态` | 群员 | 查看当前会话的开关状态 |
 
-> 命令按 NoneBot 的 `COMMAND_START` 匹配（默认只有 `/`）。想让无前缀写法也算命令，把 `COMMAND_START` 加上 `""`。
-> 命令名后必须是空白、标点或消息结尾：`php是世界上最好的语言`、`解析一下` 这类普通文本不会被当成命令。
+> 命令按 NoneBot 的 `COMMAND_START` 匹配（默认只有 `/`）；命令名后必须是空白、标点或消息结尾——
+> 「解析一下」「php是世界上最好的语言」这类普通文本不会被当成命令。
 
-### 触发规则
+### 行为要点
 
-- 群里发链接或分享文案即自动解析，一条消息最多处理 **3 个**链接
-- 只有 B 站 BV 号（如 `BV1xx411c7mD`）也会自动解析，和完整链接共用去重与缓存
-- `/解析关` 后该会话不再自动解析；手动 `/解析` 只对超管 / 群管理有效
-- 默认配置下（`COMMAND_START` 只有 `/`），不带前缀的「解析 <链接>」**不是**命令，会当作普通消息自动解析（带去重、不额外提示）
-
-### 解析开关
-
-- 以**会话**为维度（群按群号，私聊按对方 QQ），群和私聊**默认都开**
-- 关掉后该会话不再自动解析，手动解析仅超管 / 群管可用；状态所有人可看
-- 超管与群主 / 管理员可修改；状态存在 `sessions.json`，只记录与默认值不同的会话
-
-### 媒体缓存
-
-- **按作品跨会话共享**：A 群发过的视频，B 群再发直接发本地那份
-- **命中即跳过**：不解析、不下载、不画卡（卡片图也一起缓存）
-- **保留 24 小时**（命中续期），总量上限 1GB，超了按最久没用过的删
-- **不同写法归一**：`b23.tv/xxx`、`bilibili.com/video/BVxxx` 与纯 `BVxxx` 是同一个作品
-- 时间线：120 秒内同会话重复 → 静默；120 秒 ~ 24 小时 → 直接发缓存；超过 24 小时 → 重新解析
-- 手动 `/解析 <链接>` 同样吃缓存（只是不做去重拦截）
-
-### 说明
-
-- B 站链接带 `?p=N` 时解析第 N P，不带时默认 P1；时长按该 P 计算；纯 BV 号按 P1
-- 视频被协议端拒绝时只点失败表情，**不会**退回群文件
-- 投递三选一、**互不兜底**：`file` 发本机路径（协议端同机）/ `http` 发中转地址（跨机）/ `base64` 内容内联（请求体约 +1/3）
-- parsehub 全程同步阻塞，插件把所有调用放进 `asyncio.to_thread`；首次导入懒加载，不影响启动
-- 卡片用 Pillow 画，封面三级兜底（`thumb_url` → 图片媒体 → 视频抽帧），渲染异常时自动退回文字（Pillow 是硬依赖，正常安装不会缺）；
-  字体优先 `PARSEHUB_CARD_FONT` → 缓存目录 → 系统字体 → 下载（sha256 校验），缺字用回退字体补，emoji 用 Twemoji 位图字体
+- 发链接、分享文案或裸 BV / AV 号即自动解析，一条消息最多 3 个链接；`/解析关` 后仅超管 / 群管能手动解析
+- 解析开关按会话（群 / 私聊），默认全开，只把改过的会话写进 `sessions.json`
+- 同作品跨会话共享缓存：命中直接发本地那份（含卡片）；`b23.tv` / 完整链接 / 裸 BV / 裸 AV（换算成 BV）算同一作品；
+  同会话 120 秒内重复不发内容，解析后才认出是同一作品的只补一个成功表情，超过 24 小时重新解析
+  （手动 `/解析` 吃缓存、不去重）
+- B 站链接带 `?p=N` 解析第 N P（默认 P1）；`bm` 认完整链接 / 短链 / 分享文案 / 裸 BV / 裸 AV（等价换算成 BV）；
+  `ym` 认 `youtube.com`（含 music / shorts）、`youtu.be`、单独 11 位视频 ID
+- `music.youtube.com` 自动按音乐处理：卡片标「音乐」，只下载音频并发 `record` 语音，不下载视频
+- YouTube 视频自带 ffmpeg 合并音视频（系统已装则优先用系统），没装 ffmpeg 也不会再发无声视频
+- 音频默认发 record 语音，B 站免登录最高 192kbps AAC；与 `/解析` 共用开关、白名单、
+  代理与体积上限；时长上限对音频不生效；直播 / 预告 / 番剧不给提取
+- 解析结果没给时长（视频号 / Threads 必现，其它平台偶发）：下载前用 ffmpeg 只读容器头补出真实时长
+  （不落盘、不拉完整文件），时长上限照常生效；探测失败按未知时长继续，由体积上限与总超时兜底
+- 单个作品最多发 **100 项**，按单次转发容量分批（默认每批 20 项）；超出 100 项的部分不发并附提示
+- 长正文平台（微博 / 酷安 / 知乎 / 贴吧 / 公众号等）：卡片后把正文和资源放进同一个合并转发块，不再单独补文字；卡片只放三行摘要
+- 视频消息段被协议端拒绝时自动改发群文件；投递三选一、互不兜底（`file` 同机 / `http` 跨机 / `base64` 内联）
+- 卡片封面兜底（`thumb_url` → 图片媒体 → 本地图片 / 视频抽帧），渲染失败自动退回文字
 
 ## 🛠️ 开发
 
 ```bash
 uv sync --all-groups            # 安装依赖（含测试）
-uv run poe check                # 代码检查 + 格式检查 + 测试（CI 同款）
+uv run poe check                # lint + 格式 + 测试（CI 同款）
 uv run pytest -q                # 只跑测试
-uv run poe live                 # 真实链路自检（解析 → 下载 → 中转取回）
 ```
 
-架构与不变量见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；需求 / 模块 spec 已归档在
-`archive/specs` 分支，不再随 main 发布。
-
-### 代码结构
-
-```
-src/nonebot_plugin_parsehub/
-├── triggers.py         # matcher / 命令：只决定「处理谁」
-├── service.py          # 编排：每个结局都是 Outcome 里的一个值
-├── delivery.py         # 三种上传模式 + 合并转发/逐条 + 统一失败记账
-├── feedback.py         # 表情回应与用户提示文案
-├── cache.py            # 作品级媒体缓存（哈希目录、原子写）
-├── dedupe.py           # 会话级去重（claim / commit / release）
-├── relay.py            # 只读中转服务（只服务 relay/）
-├── parsehub_client.py  # ParseHub 懒加载 + 线程池封装
-├── platforms.py        # 平台元数据（展示名 / 颜色 / logo / 时长单位）
-├── keys.py             # 链接识别与作品 key 归一
-├── switches.py         # 按会话的解析开关
-├── media.py            # parsehub 结果 → MediaRef / MediaFile
-├── errors.py           # 异常分类与用户文案
-├── paths.py            # localstore 目录约定
-├── budget.py           # 解析 / 下载共享的超时预算
-├── config.py           # 配置读取与归一化
-├── card/               # fonts / cover / layout + CardRenderer
-└── app.py              # 装配与生命周期
-```
-
-模块级单例已全部移除：`App` 持有设置、客户端、缓存、去重、开关、中转、投递和卡片，
-测试直接 `App.build(...)` 造独立实例。
-
-### 代码风格
-
-遵循 [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)：行宽 80，Google 风格文档字符串，
-ruff 强制 `pydocstyle(google)` + `pep8-naming` + `isort`。
-
-有意保留的偏差：包内用相对导入（本地插件加载时绝对自引用会 ImportError）；NoneBot 按名字导入；
-中文文档字符串以「。」结尾（关闭 `D415`）；测试不强制文档字符串。
+架构、不变量与模块清单见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；需求 / 模块 spec 已归档在
+`archive/specs` 分支，不随 main 发布。代码风格遵循
+[Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)（ruff 强制）。
 
 ## 📄 许可
 

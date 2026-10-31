@@ -24,9 +24,55 @@ from __future__ import annotations
 from nonebot import get_driver
 from nonebot.plugin import PluginMetadata
 
-from . import triggers
+from . import (
+    audio,
+    bilibili,
+    bilibili_live,
+    budget,
+    cache,
+    card,
+    dedupe,
+    delivery,
+    errors,
+    feedback,
+    keys,
+    media,
+    parsehub_client,
+    paths,
+    platforms,
+    relay,
+    service,
+    switches,
+    triggers,
+)
 from .app import App
 from .config import Config, Settings, plugin_config
+
+__all__ = [
+    "APP",
+    "App",
+    "Config",
+    "Settings",
+    "audio",
+    "bilibili",
+    "bilibili_live",
+    "budget",
+    "cache",
+    "card",
+    "dedupe",
+    "delivery",
+    "errors",
+    "feedback",
+    "keys",
+    "media",
+    "parsehub_client",
+    "paths",
+    "platforms",
+    "relay",
+    "service",
+    "switches",
+    "triggers",
+]
 
 __plugin_meta__ = PluginMetadata(
     name="轻量、异步、开箱即用的社交媒体聚合解析插件",
@@ -36,7 +82,9 @@ __plugin_meta__ = PluginMetadata(
     ),
     usage=(
         "发链接即可自动解析；命令：/解析 <链接或分享文案>、/解析平台、"
-        "/解析开关 [开|关]（超管 / 群管理）、/解析状态"
+        "/解析开关 [开|关]（超管 / 群管理）、/解析状态、"
+        "/bm <BV 号或 B 站链接>（B 站音频）、"
+        "/ym <YouTube 链接>（YouTube 音频），bm / ym 加 -f 以文件发送"
     ),
     type="application",
     homepage="https://github.com/ByteColtX/nonebot-plugin-parsehub",

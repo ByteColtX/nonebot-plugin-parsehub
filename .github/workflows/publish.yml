@@ -1,16 +1,17 @@
 name: Publish to PyPI
 
+# 先手动发布 GitHub Release，
+# Release published 后再构建、发 PyPI。
 on:
-  # 打 tag（v0.1.0 这种）就发布，和官方模板的 release 工作流一致
-  push:
-    tags:
-      - v*
-  # 手动触发：发布失败或想重发时用（Actions → Publish to PyPI → Run workflow）
-  workflow_dispatch:
+  release:
+    types: [published]
 
-# 默认只读；发布 job 自己声明 id-token / contents: write
 permissions:
   contents: read
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -18,53 +19,65 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # setup-uv 没有 v8/v9/v10 的浮动大版本 tag，必须写完整版本号
-      - uses: astral-sh/setup-uv@v10.3.0
-      - name: 安装依赖（严格按 uv.lock）
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+      - name: Install dependencies (uv.lock)
         run: uv sync --locked --all-groups
-      - name: 准备 emoji 测试字体
-        run: uv run python scripts/fetch_emoji_font.py
-      - name: 跑测试
-        run: uv run pytest -q
-      - name: 代码检查
+      - name: Lint
         run: uv run ruff check . && uv run ruff format --check .
+      - name: Run tests
+        run: uv run pytest -q -rs
 
-  publish:
-    name: Build and publish
+  build:
+    name: Build
     needs: test
     runs-on: ubuntu-latest
-    # 环境名要和 PyPI Trusted Publisher 表单里填的 Environment name 一致
-    environment: pypi
-    permissions:
-      id-token: write # PyPI Trusted Publishing（OIDC 换一次性 token，不需要 API token）
-      contents: write # 把构建产物挂到 GitHub Release
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: astral-sh/setup-uv@v10.3.3
 
-      - name: 校验 tag 与 pyproject 版本一致
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Verify release tag matches pyproject version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
           version="v$(uv version --short)"
-          if [ "$tag" != "$version" ]; then
-            echo "::error::tag $tag 与 pyproject.toml 里的版本 $version 不一致"
+          if [ "$TAG" != "$version" ]; then
+            echo "::error::Release tag $TAG does not match pyproject version $version"
             exit 1
           fi
-          echo "版本一致：$tag"
+          echo "Version matches: $TAG"
 
-      - name: 构建 sdist + wheel
+      - name: Build sdist and wheel
         run: uv build
 
-      - name: 发布到 PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Upload distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-dists
+          path: dist/
 
-      - name: 把构建产物挂到 Release
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          # 首次发布还没有 Release 对象，先建再传
-          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --generate-notes
-          gh release upload --clobber "$tag" dist/*.tar.gz dist/*.whl
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  pypi-publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/nonebot-plugin-parsehub
+    permissions:
+      id-token: write # PyPI Trusted Publishing（OIDC，不需要 API token）
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: release-dists
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

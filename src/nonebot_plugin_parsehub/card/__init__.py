@@ -6,11 +6,13 @@
 把字体获取、封面获取、版式绘制串起来，并统一兜底：任何一步失败都返回 ``None``，
 由调用方退回纯文字，而不是让解析白做。
 
-内部按职责拆成三个子模块：
+内部按职责拆成五个子模块：
 
 - :mod:`fonts`：字体来源、sha256 校验、emoji / 回退字体；
-- :mod:`cover`：封面三级兜底（thumb_url → 图片媒体 → 视频抽帧）；
-- :mod:`layout`：版式、折行、绘制与渲染。
+- :mod:`cover`：封面兜底（thumb_url → 图片媒体 → 本地图片 / 视频帧）；
+- :mod:`text`：emoji 切分、字形链、折行与绘制；
+- :mod:`compose`：渐变遮罩与平台 logo 处理；
+- :mod:`layout`：版式与渲染。
 """
 
 from __future__ import annotations
@@ -22,80 +24,9 @@ from typing import Any
 
 from nonebot import logger
 
-from ..platforms import PLATFORMS
 from . import cover, fonts, layout
-from .cover import fetch_cover
-from .fonts import (
-    EMOJI_FONT_NAME,
-    EMOJI_FONT_SOURCES,
-    FALLBACK_FONTS,
-    FONT_NAME,
-    FONT_SOURCES,
-    FontSource,
-    ensure_emoji_font,
-    ensure_fallback_fonts,
-    ensure_font,
-    set_font,
-)
-from .layout import (
-    INSET,
-    KICKER_SIZE,
-    LOGO_HEIGHT,
-    MAX_RATIO,
-    META_SIZE,
-    MIN_RATIO,
-    TITLE_SIZE,
-    TYPE_LABELS,
-    WIDTH,
-    available,
-    draw_text,
-    fit_title,
-    format_duration,
-    meta_line,
-    platform_of,
-    platform_uses_milliseconds,
-    render,
-    video_seconds,
-    wrap,
-)
 
-__all__ = [
-    "EMOJI_FONT_NAME",
-    "EMOJI_FONT_SOURCES",
-    "FALLBACK_FONTS",
-    "FONT_NAME",
-    "FONT_SOURCES",
-    "INSET",
-    "KICKER_SIZE",
-    "LOGO_HEIGHT",
-    "MAX_RATIO",
-    "META_SIZE",
-    "MIN_RATIO",
-    "PLATFORMS",
-    "TITLE_SIZE",
-    "TYPE_LABELS",
-    "WIDTH",
-    "CardRenderer",
-    "FontSource",
-    "available",
-    "cover",
-    "draw_text",
-    "ensure_emoji_font",
-    "ensure_fallback_fonts",
-    "ensure_font",
-    "fetch_cover",
-    "fit_title",
-    "fonts",
-    "format_duration",
-    "layout",
-    "meta_line",
-    "platform_of",
-    "platform_uses_milliseconds",
-    "render",
-    "set_font",
-    "video_seconds",
-    "wrap",
-]
+__all__ = ["CardRenderer"]
 
 
 class CardRenderer:
@@ -147,7 +78,7 @@ class CardRenderer:
 
         Args:
             result: ParseHub 解析结果。
-            files: 已下载的本地媒体，抽帧兜底要用。
+            files: 已下载的本地媒体，图片直读、视频抽帧兜底要用。
             task_dir: 任务目录；为 ``None`` 时另建一个。
             proxy: 取封面用的代理（海外平台的封面 CDN 直连会超时）。
 
@@ -155,25 +86,34 @@ class CardRenderer:
             卡片图片路径；不可用时为 ``None``（调用方退回文字）。
         """
         try:
-            font = await asyncio.to_thread(fonts.ensure_font, self.cache_dir)
-            if font is None:
-                return None
-            # 彩色 emoji 字体：拿不到就算了，标题里的 emoji 会退回方块
-            await asyncio.to_thread(fonts.ensure_emoji_font, self.cache_dir)
-            # 回退字体（DejaVu / Noto Sans）：补主字体没有的符号
-            await asyncio.to_thread(fonts.ensure_fallback_fonts, self.cache_dir)
-            picture = await asyncio.to_thread(
-                cover.fetch_cover, result, files, proxy
+            return await asyncio.to_thread(
+                self._render_sync, result, files, task_dir, proxy
             )
-            if picture is None:
-                logger.info("[parsehub] 没有可用封面，卡片跳过")
-                return None
-            target_dir = task_dir or self._new_task_dir()
-            out_path = target_dir / "card.jpg"
-            await asyncio.to_thread(layout.render, result, picture, out_path)
         except Exception as exc:  # 渲染失败不能让解析白做
             logger.warning(
                 f"[parsehub] 卡片渲染失败: {type(exc).__name__}: {exc}"
             )
             return None
+
+    def _render_sync(
+        self,
+        result: Any,
+        files: list[Path],
+        task_dir: Path | None,
+        proxy: str,
+    ) -> Path | None:
+        """一次线程里完成字体、封面与排版（``render`` 的阻塞部分）。"""
+        font = fonts.ensure_font(self.cache_dir)
+        if font is None:
+            return None
+        # 彩色 emoji 字体：拿不到就算了，标题里的 emoji 会退回方块
+        fonts.ensure_emoji_font(self.cache_dir)
+        # 回退字体（DejaVu / Noto Sans）：补主字体没有的符号
+        fonts.ensure_fallback_fonts(self.cache_dir)
+        picture = cover.fetch_cover(result, files, proxy)
+        if picture is None:
+            return None
+        target_dir = task_dir or self._new_task_dir()
+        out_path = target_dir / "card.jpg"
+        layout.render(result, picture, out_path)
         return out_path

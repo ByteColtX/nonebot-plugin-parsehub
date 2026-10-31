@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,6 +31,29 @@ from .switches import SwitchStore
 SWEEP_INTERVAL_SECONDS = 300
 
 
+def _sweep_tmp(root: Path, max_age: float = 3600.0) -> int:
+    """删除 tmp 目录里超龄的 cookie 临时文件。
+
+    Args:
+        root: 一次性临时目录。
+        max_age: 保留时长（秒）。
+
+    Returns:
+        删除的文件数。
+    """
+    removed = 0
+    now = time.time()
+    for path in root.glob("parsehub-yt-*.cookies"):
+        try:
+            if now - path.stat().st_mtime <= max_age:
+                continue
+            path.unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 @dataclass
 class App:
     """插件运行期依赖的集合。
@@ -38,6 +62,7 @@ class App:
         settings: 归一化后的设置。
         client: ParseHub 客户端。
         cache: 作品级媒体缓存。
+        tmp_dir: 一次性临时目录（cookie 等短命文件）。
         dedupe: 会话级去重。
         switches: 按会话的解析开关。
         relay: 中转服务。
@@ -82,7 +107,7 @@ class App:
         """
         cache_root = cache_dir or paths.cache_root()
         data_root = data_dir or paths.data_root()
-        relay = MediaRelay(relay_root or cache_root / paths.RELAY_DIR_NAME)
+        relay = MediaRelay(relay_root or paths.relay_root(cache_dir))
         endpoint = RelayEndpoint()
         return cls(
             settings=settings,
@@ -100,6 +125,11 @@ class App:
             endpoint=endpoint,
             semaphore=asyncio.Semaphore(settings.concurrency),
         )
+
+    @property
+    def tmp_dir(self) -> Path:
+        """一次性临时目录（cookie 等短命文件）。"""
+        return paths.tmp_root(self.cache.root.parent)
 
     async def startup(self) -> None:
         """启动钩子：按投递模式启动中转、应用字体、预热并开始清扫。
@@ -143,6 +173,10 @@ class App:
                     f"[parsehub] 配置的字体不存在: {font}，改用自动查找"
                 )
 
+        stale = await asyncio.to_thread(_sweep_tmp, self.tmp_dir)
+        if stale:
+            logger.info(f"[parsehub] 清理了 {stale} 个过期 cookie 临时文件")
+
         self._tasks.append(asyncio.create_task(self._warm()))
         self._tasks.append(asyncio.create_task(self._sweep_forever()))
 
@@ -172,6 +206,7 @@ class App:
                     self.relay.cleanup, self.settings.task_ttl_seconds
                 )
                 expired = await asyncio.to_thread(self.cache.sweep)
+                stale = await asyncio.to_thread(_sweep_tmp, self.tmp_dir)
             except Exception as exc:  # 清扫失败不能停掉循环
                 logger.warning(f"[parsehub] 清理失败: {exc}")
                 continue
@@ -179,3 +214,5 @@ class App:
                 logger.info(f"[parsehub] 清理了 {removed} 个过期临时目录")
             if expired:
                 logger.info(f"[parsehub] 媒体缓存清理了 {expired} 个作品")
+            if stale:
+                logger.info(f"[parsehub] 清理了 {stale} 个过期 cookie 临时文件")

@@ -3,35 +3,33 @@
 
 """卡片彩色 emoji 的离线测试。
 
-emoji 字体约 3MB，不进仓库；用 ``scripts/fetch_emoji_font.py`` 下载，或通过
-``PARSEHUB_EMOJI_FONT`` 指定路径后，真实渲染的用例才会跑，否则跳过。
+测试字体是仓库里的 1.8KB 子集（只含 🍧），不联网。
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 from PIL import Image, ImageDraw
-from platformdirs import user_cache_path
 
-# 本地（LOCALSTORE_USE_CWD=true）和平台默认缓存目录都找一遍。
-_CANDIDATES = (
-    Path.cwd() / "cache" / "nonebot_plugin_parsehub" / "emoji-test.ttf",
-    user_cache_path("nonebot2") / "nonebot_plugin_parsehub" / "emoji-test.ttf",
-)
-_OVERRIDE = os.environ.get("PARSEHUB_EMOJI_FONT")
-_EMOJI_FONT_HINT = (
-    Path(_OVERRIDE).expanduser()
-    if _OVERRIDE
-    else next((path for path in _CANDIDATES if path.exists()), _CANDIDATES[0])
-)
+# Twemoji 15.0.2 子集（图形 CC-BY 4.0，字体构建 JoeBlakeB/ttf-twemoji-aur），
+# 只保留 🍧；重新生成：
+# uv run --with fonttools pyftsubset Twemoji-15.0.2.ttf \
+#   --unicodes=U+1F367 --output-file=tests/assets/test-emoji.ttf
+EMOJI_FONT = Path(__file__).resolve().parent / "assets" / "test-emoji.ttf"
+
+
+@pytest.fixture()
+def emoji_font() -> Path:
+    """测试字体随仓库提供，缺失就失败，不允许跳过。"""
+    assert EMOJI_FONT.exists(), f"测试 emoji 字体缺失：{EMOJI_FONT}"
+    return EMOJI_FONT
 
 
 def test_split_emoji_keeps_zwj_sequence(card) -> None:
     """组合序列（ZWJ、变体符、区域指示符）不能被切开。"""
-    chunks = card.layout._split_emoji("猫猫🐱和👨‍👩‍👧还有🇨🇳")
+    chunks = card.text.split_emoji("猫猫🐱和👨‍👩‍👧还有🇨🇳")
     emoji = [text for text, is_emoji in chunks if is_emoji]
     plain = [text for text, is_emoji in chunks if not is_emoji]
     assert "🐱" in emoji
@@ -42,71 +40,65 @@ def test_split_emoji_keeps_zwj_sequence(card) -> None:
 
 def test_is_emoji_char(card) -> None:
     """常见 emoji 判定，以及中英文不会被误判。"""
-    assert card.layout._is_emoji_char("🍧")
-    assert card.layout._is_emoji_char("✨")
-    assert not card.layout._is_emoji_char("猫")
-    assert not card.layout._is_emoji_char("A")
-    assert not card.layout._is_emoji_char("#")
+    assert card.text.is_emoji_char("🍧")
+    assert card.text.is_emoji_char("✨")
+    assert not card.text.is_emoji_char("猫")
+    assert not card.text.is_emoji_char("A")
+    assert not card.text.is_emoji_char("#")
 
 
 def test_draw_text_without_emoji_font(card) -> None:
     """没有 emoji 字体时退化成普通绘制，不抛异常。"""
     card.fonts._EMOJI_FONT = None
     card.fonts._emoji_font_file.cache_clear()
-    card.fonts._emoji_strike_font.cache_clear()
-    card.layout._emoji_tile.cache_clear()
+    card.fonts.emoji_strike_font.cache_clear()
+    card.text.emoji_tile.cache_clear()
     canvas = Image.new("RGB", (400, 80), (20, 20, 20))
+    before = canvas.tobytes()
     draw = ImageDraw.Draw(canvas)
-    card.layout.draw_text(
+    card.text.draw_text(
         draw,
         (10, 10),
         "猫猫🐱",
-        card.fonts._font(28, 400),
+        card.fonts.font_for(28, 400),
         (255, 255, 255),
         emoji_size=28,
     )
+    assert canvas.tobytes() != before, "没有 emoji 字体时也应该画出普通文字"
 
 
-@pytest.mark.skipif(
-    not _EMOJI_FONT_HINT.exists(),
-    reason="本地没有 emoji 字体（部署时会自动下载）",
-)
-def test_emoji_tile_scales_bitmap_strike(card) -> None:
+def test_emoji_tile_scales_bitmap_strike(card, emoji_font: Path) -> None:
     """位图字体只有固定档位，贴图必须缩到「字号 × 比例」。"""
-    card.fonts._EMOJI_FONT = _EMOJI_FONT_HINT
+    card.fonts._EMOJI_FONT = emoji_font
     card.fonts._emoji_font_file.cache_clear()
-    card.fonts._emoji_strike_font.cache_clear()
-    card.layout._emoji_tile.cache_clear()
+    card.fonts.emoji_strike_font.cache_clear()
+    card.text.emoji_tile.cache_clear()
     try:
-        tile = card.layout._emoji_tile("🍧", 58)
+        tile = card.text.emoji_tile("🍧", 58)
     finally:
         card.fonts._EMOJI_FONT = None
         card.fonts._emoji_font_file.cache_clear()
-        card.fonts._emoji_strike_font.cache_clear()
-        card.layout._emoji_tile.cache_clear()
+        card.fonts.emoji_strike_font.cache_clear()
+        card.text.emoji_tile.cache_clear()
     assert tile, "贴图不该为空"
     image = tile[0]
-    assert image.height == round(58 * card.layout.EMOJI_RATIO), "没缩到目标高度"
+    assert image.height == round(58 * card.text.EMOJI_RATIO), "没缩到目标高度"
     assert image.width > 0
 
 
-@pytest.mark.skipif(
-    not _EMOJI_FONT_HINT.exists(),
-    reason="本地没有 emoji 字体（部署时会自动下载）",
-)
-def test_emoji_tile_is_colored(card) -> None:
+def test_emoji_tile_is_colored(card, emoji_font: Path) -> None:
     """emoji 贴图必须真的带上颜色，而不是空白。"""
-    card.fonts._EMOJI_FONT = _EMOJI_FONT_HINT
+    card.fonts._EMOJI_FONT = emoji_font
     card.fonts._emoji_font_file.cache_clear()
-    card.fonts._emoji_strike_font.cache_clear()
-    card.layout._emoji_tile.cache_clear()
+    card.fonts.emoji_strike_font.cache_clear()
+    card.text.emoji_tile.cache_clear()
     try:
-        tile = card.layout._emoji_tile("🍧", 32)
+        tile = card.text.emoji_tile("🍧", 32)
     finally:
         card.fonts._EMOJI_FONT = None
         card.fonts._emoji_font_file.cache_clear()
-        card.fonts._emoji_strike_font.cache_clear()
-        card.layout._emoji_tile.cache_clear()
+        card.fonts.emoji_strike_font.cache_clear()
+        card.text.emoji_tile.cache_clear()
     assert tile, "贴图不该为空"
     image = tile[0]
     pixels = image.convert("RGB").load()

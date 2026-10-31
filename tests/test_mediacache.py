@@ -1,14 +1,17 @@
 # Copyright 2026 ByteColtX
 # SPDX-License-Identifier: MIT
 
-"""媒体缓存的单元测试（纯文件操作，不依赖 nonebot）。"""
+"""媒体缓存与缓存命中路径的测试（既有纯文件操作，也有经 service 的端到端路径）。"""
 
-from __future__ import annotations
-
+import asyncio
 import json
 import os
 import time
 from pathlib import Path
+
+import pytest
+from fake import make_group_event
+from fakes import FakeBot, FakeParseResult
 
 
 def _files(tmp_path: Path, *names: str, size: int = 1024) -> list[Path]:
@@ -63,6 +66,19 @@ def test_store_then_get(tmp_path: Path, cache, card) -> None:
     assert hit.caption == "标题"
     assert hit.seconds == 42
     assert hit.keys == ("bilibili:bv1",)
+
+
+def test_old_schema_is_treated_as_miss(tmp_path: Path, cache) -> None:
+    """旧版卡片可能没有正文，schema 不匹配就当未命中重新解析。"""
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
+    entry = store.store(["k"], _files(tmp_path, "a.jpg"))
+    assert entry is not None
+    assert _meta(entry)["schema"] == cache.META_SCHEMA
+
+    meta = _meta(entry)
+    meta["schema"] = cache.META_SCHEMA - 1
+    (entry / "meta.json").write_text(json.dumps(meta), "utf-8")
+    assert store.get("k") is None
 
 
 def test_get_missing_key(tmp_path: Path, cache) -> None:
@@ -189,6 +205,25 @@ def test_corrupt_meta_is_miss(tmp_path: Path, cache) -> None:
     assert store.get("k") is None
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("updated_at", "not-a-number"), ("seconds", "oops")],
+)
+def test_bad_meta_field_is_miss(
+    tmp_path: Path, cache, field: str, value: str
+) -> None:
+    """meta 字段类型不对也算坏缓存，不能把 get / sweep 打崩。"""
+    store = cache.MediaCache(tmp_path / "media", ttl_seconds=3600, max_bytes=0)
+    entry = store.store(["k"], _files(tmp_path, "a.jpg"))
+    assert entry is not None
+    meta = _meta(entry)
+    meta[field] = value
+    (entry / "meta.json").write_text(json.dumps(meta), "utf-8")
+
+    assert store.get("k") is None
+    assert store.sweep() == 0
+
+
 def test_broken_alias_is_cleaned(tmp_path: Path, cache) -> None:
     """主条目被删掉后，别名符号链接会在 sweep 时清掉。"""
     store = cache.MediaCache(tmp_path / "media", ttl_seconds=60, max_bytes=0)
@@ -201,3 +236,38 @@ def test_broken_alias_is_cleaned(tmp_path: Path, cache) -> None:
     store.sweep()
     assert not primary.exists()
     assert not alias.exists()
+
+
+async def test_post_key_hit_respects_duration_limit(
+    instance, service, update_settings, monkeypatch, tmp_path: Path
+) -> None:
+    """短链展开后按 post_key 命中的缓存条目，也要过时长上限。
+
+    上限开大之前存进来的超时长条目，不能经短链 → 解析 → post_key 这条
+    命中路径直接发出去（首次命中有检查，这条漏了）。
+    """
+    media = tmp_path / "a.mp4"
+    media.write_bytes(b"media")
+    instance.cache.store(["bilibili:bv1a2xl67emp"], [media], seconds=300)
+    update_settings(max_seconds=60)
+
+    monkeypatch.setattr(
+        instance.client,
+        "is_supported",
+        lambda url: asyncio.sleep(0, result=True),
+    )
+
+    async def fake_parse(url, proxy="", cookie=""):
+        return FakeParseResult(
+            raw_url="https://www.bilibili.com/video/BV1A2xL67EMP"
+        )
+
+    monkeypatch.setattr(instance.client, "parse", fake_parse)
+
+    bot = FakeBot()
+    url = "https://b23.tv/abcd"
+    result = await service.handle(instance, bot, make_group_event(url), url)
+
+    assert result.outcome is not service.Outcome.FROM_CACHE, (
+        "超时长的条目不能从缓存直接发"
+    )

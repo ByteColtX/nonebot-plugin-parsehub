@@ -105,7 +105,13 @@ class SwitchStore:
             logger.warning("[parsehub] 解析开关文件缺少 sessions，按默认值处理")
             self._state = {}
             return
-        self._state = {str(key): bool(value) for key, value in sessions.items()}
+        if any(not isinstance(value, bool) for value in sessions.values()):
+            logger.warning(
+                "[parsehub] 解析开关文件里有非 bool 值，按默认值处理"
+            )
+            self._state = {}
+            return
+        self._state = {str(key): value for key, value in sessions.items()}
 
     def save(self) -> None:
         """原子写盘（先写 ``*.tmp`` 再 rename）。

@@ -13,6 +13,7 @@ matcher 由 :func:`create_matchers` 按传入的 ``App`` 创建，测试可以�
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -27,13 +28,13 @@ from nonebot.matcher import Matcher
 from nonebot.params import CommandArg, RawCommand
 from nonebot.rule import Rule
 
-from . import keys
-from .service import handle, session_key, session_name
+from . import audio, feedback, keys, platforms
+from .service import handle, handle_audio, session_key, session_name
 
 if TYPE_CHECKING:
     from .app import App
+    from .switches import SwitchStore
 
-# 单条消息最多处理几个链接。
 MAX_LINKS_PER_MESSAGE = 3
 
 # 「解析开关」命令能接受的参数写法。
@@ -54,12 +55,16 @@ class Matchers:
         parse: ``解析`` 命令。
         platforms: ``解析平台`` 命令。
         switch: ``解析开关`` 命令。
+        bm: ``bm`` 命令（B 站音频）。
+        ym: ``ym`` 命令（YouTube 音频）。
     """
 
     auto: type[Matcher]
     parse: type[Matcher]
     platforms: type[Matcher]
     switch: type[Matcher]
+    bm: type[Matcher]
+    ym: type[Matcher]
 
 
 def link_sources(event: MessageEvent) -> str:
@@ -120,6 +125,24 @@ def can_control(event: MessageEvent) -> bool:
         超管或群管理为 ``True``。
     """
     return is_superuser(event) or is_group_admin(event)
+
+
+async def _require_open(
+    matcher: type[Matcher],
+    event: MessageEvent,
+    switches: SwitchStore,
+) -> None:
+    """会话的解析被关、且来者无权限时，用同一句文案结束处理。
+
+    Args:
+        matcher: 要结束的 matcher。
+        event: 消息事件。
+        switches: 会话开关存储。
+    """
+    if not switches.is_on(session_key(event)) and not can_control(event):
+        await matcher.finish(
+            f"{session_name(event)}的解析已关闭，只有超管或群管理员能手动解析。"
+        )
 
 
 def command_boundary() -> Rule:
@@ -197,7 +220,6 @@ def create_matchers(app: App) -> Matchers:
     Returns:
         注册好的 matcher 集合。
     """
-    settings = app.settings
     switches = app.switches
 
     auto = on_message(rule=auto_rule(app), priority=20, block=False)
@@ -223,18 +245,30 @@ def create_matchers(app: App) -> Matchers:
         block=True,
     )
 
+    bm = on_command(
+        "bm",
+        rule=command_boundary(),
+        priority=10,
+        block=True,
+    )
+    ym = on_command(
+        "ym",
+        rule=command_boundary(),
+        priority=10,
+        block=True,
+    )
+
     @auto.handle()
     async def _handle_auto(bot: Bot, event: MessageEvent) -> None:
         """自动解析消息里的链接。"""
         urls = keys.extract_targets(link_sources(event))
-        session = session_key(event)
-        for url in urls[:MAX_LINKS_PER_MESSAGE]:
-            # 只看不记：记录由 service 负责；这里先静默跳过，免得白发「收到」
-            if app.dedupe.seen(
-                session, keys.content_key(url), settings.dedupe_seconds
-            ):
-                continue
-            await handle(app, bot, event, url)
+        # 并发信号量在 service 里兜底，这里直接扇出。
+        await asyncio.gather(
+            *(
+                handle(app, bot, event, url)
+                for url in urls[:MAX_LINKS_PER_MESSAGE]
+            )
+        )
 
     @parse.handle()
     async def _handle_parse(
@@ -243,24 +277,28 @@ def create_matchers(app: App) -> Matchers:
         args: Message = CommandArg(),
     ) -> None:
         """处理 ``解析 <链接>`` 命令。"""
-        if not switches.is_on(session_key(event)) and not can_control(event):
-            await parse.finish(
-                f"{session_name(event)}的解析已关闭，"
-                "只有超管或群管理员能手动解析。"
-            )
+        await _require_open(parse, event, switches)
         text = args.extract_plain_text().strip() or link_sources(event)
         urls = keys.extract_targets(text)
         if not urls:
             await parse.finish("用法：解析 <链接、BV 号或分享文案>")
-        for url in urls[:MAX_LINKS_PER_MESSAGE]:
-            await handle(app, bot, event, url, manual=True)
+        await asyncio.gather(
+            *(
+                handle(app, bot, event, url, manual=True)
+                for url in urls[:MAX_LINKS_PER_MESSAGE]
+            )
+        )
 
     @platform_cmd.handle()
     async def _handle_platforms() -> None:
         """处理 ``解析平台`` 命令。"""
-        listed = await app.client.platforms()
+        listed = [
+            item
+            for item in await app.client.platforms()
+            if item.get("id") in platforms.SUPPORTED_PLATFORMS
+        ]
         if not listed:
-            await platform_cmd.finish("ParseHub 没有加载到任何平台。")
+            await platform_cmd.finish("ParseHub 没有加载到受支持的平台。")
         names = "、".join(f"{item['name']}({item['id']})" for item in listed)
         await platform_cmd.finish(
             f"ParseHub 支持 {len(listed)} 个平台：\n{names}"
@@ -310,9 +348,55 @@ def create_matchers(app: App) -> Matchers:
             "手动解析也只有超管和群管理员能用。"
         )
 
+    def _audio_handler(
+        cmd: type[Matcher],
+        platform_id: str,
+        extract: Callable[[str], str | None],
+        usage: Callable[[], str],
+    ) -> None:
+        """注册一个音频命令的处理器（bm / ym 共用同一套骨架）。
+
+        Args:
+            cmd: 要注册到的命令 matcher。
+            platform_id: 平台 id（``bilibili`` / ``youtube``）。
+            extract: 从剩余文本里提取目标链接，提不到为 ``None``。
+            usage: 用法提示文案。
+        """
+
+        @cmd.handle()
+        async def _handler(
+            bot: Bot,
+            event: MessageEvent,
+            args: Message = CommandArg(),
+        ) -> None:
+            """门禁 → 提取目标 → 交给 :func:`handle_audio`。"""
+            await _require_open(cmd, event, switches)
+            as_file, rest = audio.parse_command(args.extract_plain_text())
+            target = extract(rest)
+            if target is None:
+                await cmd.finish(usage())
+            await handle_audio(
+                app, bot, event, target, platform_id, as_file=as_file
+            )
+
+    _audio_handler(
+        bm,
+        "bilibili",
+        audio.extract_bilibili,
+        feedback.audio_usage_bili,
+    )
+    _audio_handler(
+        ym,
+        "youtube",
+        audio.extract_youtube,
+        feedback.audio_usage_yt,
+    )
+
     return Matchers(
         auto=auto,
         parse=parse,
         platforms=platform_cmd,
         switch=switch,
+        bm=bm,
+        ym=ym,
     )

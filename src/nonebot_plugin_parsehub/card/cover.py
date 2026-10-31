@@ -1,7 +1,7 @@
 # Copyright 2026 ByteColtX
 # SPDX-License-Identifier: MIT
 
-"""封面获取：thumb_url → 图片媒体 → 本地视频抽帧。
+"""封面获取：thumb_url → 图片媒体 → 本地图片直读 / 视频抽帧。
 
 同步阻塞，调用方必须放进线程池。
 """
@@ -68,7 +68,7 @@ def fetch_cover(
 ) -> bytes | None:
     """取封面图，三级兜底。
 
-    顺序：``thumb_url`` → 本身就是图片的媒体 → 本地视频抽首帧。
+    顺序：``thumb_url`` → 本身就是图片的媒体 → 本地图片 → 本地视频首帧。
 
     Args:
         result: ParseHub 解析结果。
@@ -116,7 +116,10 @@ def fetch_cover(
                     "webp",
                 ):
                     continue
-                resp = client.get(getattr(item, "url", ""))
+                url = getattr(item, "url", "")
+                if not url:
+                    continue
+                resp = client.get(url)
                 if resp.status_code == 200 and len(resp.content) > 24_000:
                     return resp.content
     except Exception as exc:  # 网络问题都算取封面失败

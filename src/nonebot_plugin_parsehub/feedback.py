@@ -15,7 +15,7 @@ from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageEvent
 
 from .delivery import Sender
-from .errors import ErrorKind, short_error, translate
+from .errors import ErrorKind, ParseFailure
 from .platforms import display_name
 
 _BYTES_PER_MEGABYTE = 1024 * 1024
@@ -54,16 +54,15 @@ async def react(
         logger.debug(f"[parsehub] 表情回应 {reaction} 失败（忽略）: {exc}")
 
 
-def failure_notice(exc: BaseException) -> str:
+def failure_notice(failure: ParseFailure) -> str:
     """解析失败时发给用户的一句话。
 
     Args:
-        exc: 捕获到的异常。
+        failure: 已分类的失败（调用方先 ``errors.translate``）。
 
     Returns:
         提示文案。
     """
-    failure = translate(exc)
     if failure.kind is ErrorKind.UNAVAILABLE:
         return "这个作品已经不可用了（可能被删了）。"
     if failure.kind is ErrorKind.TIMEOUT:
@@ -71,16 +70,16 @@ def failure_notice(exc: BaseException) -> str:
     return f"解析失败：{failure.detail}"
 
 
-def download_failed_notice(exc: BaseException) -> str:
+def download_failed_notice(failure: ParseFailure) -> str:
     """下载失败时发给用户的一句话。
 
     Args:
-        exc: 捕获到的异常。
+        failure: 已分类的失败（调用方先 ``errors.translate``）。
 
     Returns:
         提示文案。
     """
-    return f"下载失败：{short_error(exc)}"
+    return f"下载失败：{failure.detail}"
 
 
 def internal_error_notice() -> str:
@@ -137,14 +136,52 @@ def too_large_notice(size: int) -> str:
     return f"文件约 {size / _BYTES_PER_MEGABYTE:.0f}MB，超过上限，已跳过。"
 
 
-def truncated_notice(total: int, sent: int) -> str:
+def truncated_notice(total: int, sent: int, limit: int) -> str:
     """媒体数量超过上限时的提示。
 
     Args:
         total: 作品里的媒体总数。
         sent: 实际发送的数量。
+        limit: 单次最多发送的数量。
 
     Returns:
         提示文案。
     """
-    return f"（作品共 {total} 项，超过上限，只发前 {sent} 项）"
+    return f"（作品共 {total} 项，单次最多 {limit} 项，已发 {sent} 项）"
+
+
+def audio_too_large_notice(size: int) -> str:
+    """音频超过体积上限时的提示。
+
+    Args:
+        size: 预估或实际字节数。
+
+    Returns:
+        提示文案。
+    """
+    return (
+        f"音频约 {size / _BYTES_PER_MEGABYTE:.0f}MB，"
+        "超过体积上限，试试点歌短一点的。"
+    )
+
+
+def audio_usage_bili() -> str:
+    """Bm 命令的用法提示。"""
+    return "用法：bm <BV/AV 号或 B 站链接>（-f 以文件发送）"
+
+
+def audio_usage_yt() -> str:
+    """Ym 命令的用法提示。"""
+    return "用法：ym <YouTube 链接或视频 ID>（-f 以文件发送）"
+
+
+def audio_failed_notice(failure: ParseFailure) -> str:
+    """音频获取 / 下载失败时的一句话。
+
+    Args:
+        failure: 已分类的失败（调用方先 ``errors.translate``）。
+
+    Returns:
+        压平后的提示。
+    """
+    return f"音频获取失败：{failure.detail}"

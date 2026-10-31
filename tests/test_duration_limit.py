@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from fake import make_group_event
-from test_plugin import (
+from fakes import (
     FakeBot,
     FakeDownloadResult,
     FakeMediaRef,
@@ -20,36 +20,37 @@ from test_plugin import (
 URL = "https://b23.tv/abcd"
 
 
-@pytest.fixture()
-def tmp_media(tmp_path, monkeypatch, plugin, instance):
-    """中转根目录指到临时目录，避免真写到仓库里。"""
-    monkeypatch.setattr(instance.relay, "root", tmp_path)
-    monkeypatch.setattr(instance.endpoint, "host", "127.0.0.1")
-    monkeypatch.setattr(instance.endpoint, "port", 18899)
-    return tmp_path
-
-
 def _wire(
     monkeypatch,
     instance,
     card,
     tmp_media,
     *,
-    duration: int,
+    duration: int = 0,
+    durations: list[int] | None = None,
     platform_id: str = "bilibili",
     display_name: str = "哔哩哔哩",
     ext: str = "mp4",
     media_mod,
 ) -> dict[str, int]:
-    """装好假的 parse / download / probe_size，返回调用计数。"""
+    """装好假的 parse / download / probe_size，返回调用计数。
+
+    ``durations`` 用来造多视频作品；不给时按单个 ``duration`` 造。
+    """
     media_file = tmp_media / f"media.{ext}"
     media_file.write_bytes(b"x" * 1024)
     calls = {"download": 0}
 
     async def fake_parse(url, proxy="", cookie=""):
-        ref = FakeMediaRef(f"https://cdn.example.com/media.{ext}", ext)
-        ref.duration = duration
-        result = FakeParseResult(media=ref)
+        values = durations if durations is not None else [duration]
+        refs = []
+        for index, value in enumerate(values):
+            ref = FakeMediaRef(
+                f"https://cdn.example.com/media{index}.{ext}", ext
+            )
+            ref.duration = value
+            refs.append(ref)
+        result = FakeParseResult(media=refs if len(refs) > 1 else refs[0])
         result.platform = SimpleNamespace(
             id=platform_id, display_name=display_name
         )
@@ -70,11 +71,6 @@ def _wire(
     )
     monkeypatch.setattr(instance.client, "parse", fake_parse)
     monkeypatch.setattr(instance.client, "download", fake_download)
-    monkeypatch.setattr(
-        instance.client,
-        "platform_id",
-        lambda url: asyncio.sleep(0, result=platform_id),
-    )
     monkeypatch.setattr(
         media_mod,
         "probe_size",
@@ -239,3 +235,266 @@ async def test_millisecond_platform_converts_before_checking(
         instance, bot2, make_group_event("https://xhslink.cn/o/abc"), URL
     )
     assert calls["download"] == 1, "8 秒的小红书视频不该被时长上限拦下"
+
+
+@pytest.mark.asyncio
+async def test_kuaishou_milliseconds_are_not_treated_as_long(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """快手报告 11933，实际 11.93 秒，不能按 11933 秒拦下载。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=11933,
+        platform_id="kuaishou",
+        display_name="快手",
+        media_mod=media_mod,
+    )
+    bot = FakeBot()
+    await service.handle(
+        instance, bot, make_group_event("https://v.kuaishou.com/abc"), URL
+    )
+    assert calls["download"] == 1, "12 秒的快手视频不该被时长上限拦下"
+    assert not any("太长" in t for t in bot.sent_texts), bot.sent_texts
+
+
+@pytest.mark.asyncio
+async def test_long_seconds_video_is_blocked(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """YouTube 这类秒单位的 4 小时视频不能被当成 14 秒放过去。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=14400,
+        platform_id="youtube",
+        display_name="YouTube",
+        media_mod=media_mod,
+    )
+    bot = FakeBot()
+    await service.handle(instance, bot, make_group_event(URL), URL)
+    assert "视频太长啦，还是去YouTube看吧" in bot.sent_texts, bot.sent_texts
+    assert calls["download"] == 0, "4 小时视频不该下载"
+
+
+def test_long_seconds_are_not_milliseconds(card, plugin) -> None:
+    """秒单位的 4 小时仍是 4 小时；只有明确的毫秒平台才除以 1000。"""
+    assert plugin.platforms.duration_seconds("youtube", [14400]) == 14400
+    assert card.layout.format_duration(14400) == "4:00:00"
+    assert plugin.platforms.duration_seconds("douyin", [14400]) == 14
+    assert card.layout.format_duration(14400, is_ms=True) == "00:14"
+
+
+def _fake_probe(plugin, monkeypatch, seconds: int) -> dict[str, int]:
+    """把视频号时长探测换成固定返回值，记录调用次数。"""
+    calls = {"probe": 0}
+
+    def probe(url, *, timeout=8.0, proxy=""):
+        calls["probe"] += 1
+        return seconds
+
+    monkeypatch.setattr(plugin.service.duration, "probe", probe)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_weixin_channels_probes_duration_before_download(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """视频号上游 duration 恒为 0：下载前从容器头探出真实时长并拦截。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=0,
+        platform_id="weixin_channels",
+        display_name="微信视频号",
+        media_mod=media_mod,
+    )
+    probed = _fake_probe(plugin, monkeypatch, 600)
+
+    bot = FakeBot()
+    await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert probed["probe"] == 1, "视频号必须在下载前探测时长"
+    assert "视频太长啦，还是去微信视频号看吧" in bot.sent_texts, bot.sent_texts
+    assert calls["download"] == 0, "超长视频号视频不该下载"
+
+
+@pytest.mark.asyncio
+async def test_weixin_channels_probe_failure_falls_through(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """探测失败按未知处理：照常下载，不因为探测失败就丢掉作品。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=0,
+        platform_id="weixin_channels",
+        display_name="微信视频号",
+        media_mod=media_mod,
+    )
+    probed = _fake_probe(plugin, monkeypatch, 0)
+
+    bot = FakeBot()
+    await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert probed["probe"] == 1
+    assert calls["download"] == 1, "探测失败时应按未知时长继续"
+    assert not any("太长" in t for t in bot.sent_texts), bot.sent_texts
+
+
+@pytest.mark.asyncio
+async def test_probe_skipped_when_limit_disabled(
+    plugin,
+    monkeypatch,
+    tmp_media,
+    card,
+    instance,
+    service,
+    media_mod,
+    update_settings,
+):
+    """``PARSEHUB_MAX_SECONDS=0`` 时没有上限要判，不该多花一次探测。"""
+    update_settings(max_seconds=0)
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=0,
+        platform_id="weixin_channels",
+        display_name="微信视频号",
+        media_mod=media_mod,
+    )
+    probed = _fake_probe(plugin, monkeypatch, 600)
+
+    bot = FakeBot()
+    await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert probed["probe"] == 0, "不限时长时不需要探测"
+    assert calls["download"] == 1
+
+
+@pytest.mark.asyncio
+async def test_probe_skipped_when_duration_is_known(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """解析结果已经给了时长：不再多花一次探测。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=120,
+        platform_id="zuiyou",
+        display_name="最右",
+        media_mod=media_mod,
+    )
+    probed = _fake_probe(plugin, monkeypatch, 600)
+
+    bot = FakeBot()
+    await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert probed["probe"] == 0, "已知时长不该再探测"
+    assert calls["download"] == 1
+
+
+@pytest.mark.asyncio
+async def test_any_platform_with_unknown_duration_is_probed(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """不只视频号：任何平台解析结果为 0 的视频都走同一套兜底。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=0,
+        platform_id="zuiyou",
+        display_name="最右",
+        media_mod=media_mod,
+    )
+    probed = _fake_probe(plugin, monkeypatch, 600)
+
+    bot = FakeBot()
+    await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert probed["probe"] == 1, "非视频号平台的 0 时长也要探测"
+    assert "视频太长啦，还是去最右看吧" in bot.sent_texts, bot.sent_texts
+    assert calls["download"] == 0
+
+
+@pytest.mark.asyncio
+async def test_multiple_unknown_videos_probe_takes_longest(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """多视频作品逐个探测，任意一个超限就停，取最长值判断。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        durations=[0, 0],
+        media_mod=media_mod,
+    )
+    values = iter([100, 600])
+    probed = {"probe": 0}
+
+    def probe(url, *, timeout=8.0, proxy=""):
+        probed["probe"] += 1
+        return next(values)
+
+    monkeypatch.setattr(plugin.service.duration, "probe", probe)
+
+    bot = FakeBot()
+    await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert probed["probe"] == 2, "两个视频都要探测"
+    assert "视频太长啦，还是去B 站看吧" in bot.sent_texts, bot.sent_texts
+    assert calls["download"] == 0
+
+
+@pytest.mark.asyncio
+async def test_image_post_does_not_probe(
+    plugin, monkeypatch, tmp_media, card, instance, service, media_mod
+):
+    """图片帖没有视频引用，不该为「时长为 0」白探一次。"""
+    calls = _wire(
+        monkeypatch,
+        instance,
+        card,
+        tmp_media,
+        duration=0,
+        platform_id="weixin_channels",
+        display_name="微信视频号",
+        ext="jpg",
+        media_mod=media_mod,
+    )
+    probed = _fake_probe(plugin, monkeypatch, 600)
+
+    bot = FakeBot()
+    await service.handle(instance, bot, make_group_event(URL), URL)
+
+    assert probed["probe"] == 0, "图片不该探测时长"
+    assert calls["download"] == 1
+
+
+def test_parse_duration_from_ffmpeg_stderr(plugin) -> None:
+    """ffmpeg 的 Duration 行要能转成秒；N/A 视为未知。"""
+    duration = plugin.service.duration
+    stderr = (
+        "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'https://example.com/a.mp4':\n"
+        "  Duration: 00:01:07.34, start: 0.000000, bitrate: 1048 kb/s\n"
+    )
+    assert duration.parse_duration(stderr) == 67
+    assert duration.parse_duration("Duration: 01:02:03.00, start: 0") == 3723
+    assert duration.parse_duration("  Duration: N/A, start: 0.000000") == 0
+    assert duration.parse_duration("") == 0

@@ -4,7 +4,8 @@
 """字体获取、校验与回退。
 
 中文字体、彩色 emoji 字体、回退字体都在这里：下载源钉在固定提交上并做 sha256
-校验，拿不到就降级（没有 emoji 字体只是 emoji 变方块，不影响出卡）。
+校验，拿不到就降级（没有 emoji 字体只是 emoji 变方块，不影响出卡）。三份
+「查缓存 → 验 sha256 → 下载」共用 :func:`_ensure_downloaded`。
 
 模块只在需要时 import Pillow，缺 Pillow 时由调用方处理 ImportError。
 """
@@ -165,7 +166,56 @@ def _fetch_font(
     return True
 
 
-# 结果类型 → 中文标签
+def _cached_ok(
+    local: Path,
+    sources: tuple[FontSource, ...],
+    min_size: int,
+) -> bool:
+    """缓存里是不是已有一份 sha 校验过的字体。
+
+    校验不过就删掉待重下，不留着用。
+
+    Args:
+        local: 缓存里的字体路径。
+        sources: 允许的来源列表。
+        min_size: 小于这个字节数就当作没下全。
+
+    Returns:
+        缓存可用为 ``True``。
+    """
+    if local.exists() and local.stat().st_size > min_size:
+        if _matches_sources(local, sources):
+            return True
+        local.unlink(missing_ok=True)
+    return False
+
+
+def _ensure_downloaded(
+    local: Path,
+    sources: tuple[FontSource, ...],
+    min_size: int,
+    url: str = "",
+) -> bool:
+    """确保 ``local`` 有一份校验过的字体，必要时下载。
+
+    Args:
+        local: 缓存里的目标路径。
+        sources: 已知下载源（带 sha256，按顺序尝试）。
+        min_size: 小于这个字节数就当作没下全。
+        url: 自定义下载地址（没法预先知道 sha256，不校验），优先于 ``sources``。
+
+    Returns:
+        ``local`` 可用为 ``True``；拿不到为 ``False``。
+    """
+    if _cached_ok(local, sources, min_size):
+        return True
+    candidates = (FontSource(url, ""), *sources) if url else sources
+    for source in candidates:
+        if _fetch_font(source, local, min_size):
+            return True
+    return False
+
+
 def _pil() -> Any:  # 返回 PIL.Image 模块，避免顶层 import 失败
     """延迟导入 Pillow，缺失时由调用方处理。
 
@@ -201,7 +251,7 @@ def _font_file() -> Path | None:
 
 
 @lru_cache(maxsize=32)
-def _font(size: int, weight: int = 400) -> Any:  # PIL FreeTypeFont
+def font_for(size: int, weight: int = 400) -> Any:  # PIL FreeTypeFont
     """按字号和字重取字体对象（带缓存）。
 
     Args:
@@ -248,9 +298,8 @@ EMOJI_FONT_SOURCES: tuple[FontSource, ...] = (
 EMOJI_FONT_NAME = "Twemoji-15.0.2.ttf"
 
 
-# CBDT 位图字体的档位由 _emoji_strike_font 动态探测（这份 Twemoji 是 61px），
+# CBDT 位图字体的档位由 emoji_strike_font 动态探测（这份 Twemoji 是 61px），
 # 画别的字号必须先按档位画再缩
-# emoji 贴图高度占字号多少（中文墨迹大约 0.9 个字号高）
 @lru_cache(maxsize=1)
 def _emoji_font_file() -> Path | None:
     """彩色 emoji 字体文件（不下载）。
@@ -264,7 +313,7 @@ def _emoji_font_file() -> Path | None:
 
 
 @lru_cache(maxsize=1)
-def _emoji_strike_font() -> Any:  # PIL FreeTypeFont
+def emoji_strike_font() -> Any:  # PIL FreeTypeFont
     """取 emoji 字体对象（位图字体只有固定档位）。
 
     CBDT 位图字体按档位给字号，随便传一个数字会报 ``invalid pixel size``，所以从
@@ -305,25 +354,13 @@ def ensure_emoji_font(cache_dir: Path, url: str = "") -> Path | None:
         return _EMOJI_FONT
 
     local = cache_dir / EMOJI_FONT_NAME
-    if local.exists() and local.stat().st_size > 200_000:
-        if _matches_sources(local, EMOJI_FONT_SOURCES):
-            _EMOJI_FONT = local
-            _emoji_font_file.cache_clear()
-            _emoji_strike_font.cache_clear()
-            return local
-        local.unlink(missing_ok=True)  # 校验不过就重下
-
-    if url and _fetch_font(FontSource(url, ""), local, 200_000):
+    if _ensure_downloaded(local, EMOJI_FONT_SOURCES, 200_000, url):
         _EMOJI_FONT = local
         _emoji_font_file.cache_clear()
-        _emoji_strike_font.cache_clear()
+        emoji_strike_font.cache_clear()
+        # 字形缓存按字体对象的 id 记，换字体必须清，否则会跨代复用误判
+        _GLYPH_CACHE.clear()
         return local
-    for source in EMOJI_FONT_SOURCES:
-        if _fetch_font(source, local, 200_000):
-            _EMOJI_FONT = local
-            _emoji_font_file.cache_clear()
-            _emoji_strike_font.cache_clear()
-            return local
 
     logger.warning("[parsehub] 没有可用的 emoji 字体，标题里的 emoji 会是方块")
     return None
@@ -392,7 +429,7 @@ _FALLBACK_FILES: list[Path] = []
 
 
 @lru_cache(maxsize=16)
-def _fallback_fonts(size: int) -> tuple[Any, ...]:
+def fallback_fonts(size: int) -> tuple[Any, ...]:
     """按字号取回退字体对象，顺序即查找顺序。
 
     Args:
@@ -429,24 +466,18 @@ def ensure_fallback_fonts(cache_dir: Path) -> list[Path]:
 
     files: list[Path] = []
     for name, sources in FALLBACK_FONTS:
-        local = cache_dir / name
-        if local.exists() and local.stat().st_size > 100_000:
-            if not _matches_sources(local, sources):
-                local.unlink(missing_ok=True)  # 校验不过就重下，不留着用
-        if not (local.exists() and local.stat().st_size > 100_000):
-            for source in sources:
-                if _fetch_font(source, local, 100_000):
-                    break
-        if local.exists() and local.stat().st_size > 100_000:
-            files.append(local)
+        if _ensure_downloaded(cache_dir / name, sources, 100_000):
+            files.append(cache_dir / name)
         else:
             logger.warning(f"[parsehub] 回退字体 {name} 不可用，缺字会画成方块")
     _FALLBACK_FILES = files
-    _fallback_fonts.cache_clear()
+    fallback_fonts.cache_clear()
+    # 字形缓存按字体对象的 id 记，换字体必须清，否则会跨代复用误判
+    _GLYPH_CACHE.clear()
     return files
 
 
-def _has_glyph(font: Any, text: str) -> bool:  # PIL FreeTypeFont
+def has_glyph(font: Any, text: str) -> bool:  # PIL FreeTypeFont
     """查字体里有没有这段文字的字形。
 
     用私用区字符当"必然缺字"的参照，跟 ``.notdef`` 的 mask 比"不相等"——不能比
@@ -479,11 +510,15 @@ def set_font(path: Path) -> None:
     global _CUSTOM_FONT  # 单例式配置
     _CUSTOM_FONT = path
     _font_file.cache_clear()
-    _font.cache_clear()
+    font_for.cache_clear()
+    _GLYPH_CACHE.clear()
 
 
 def ensure_font(cache_dir: Path, url: str = "") -> Path | None:
     """确保有一份可用字体，必要时下载到缓存目录。
+
+    顺序：自定义（:func:`set_font`）→ 缓存 → 系统字体 → 下载。系统里有现成
+    中文字体就不下 18MB 的镜像。
 
     Args:
         cache_dir: 插件缓存目录，下载的字体放在这里。
@@ -492,36 +527,31 @@ def ensure_font(cache_dir: Path, url: str = "") -> Path | None:
     Returns:
         字体文件路径；不可用时为 ``None``。
     """
-    global _CUSTOM_FONT  # 单例式配置
+
+    def adopt(path: Path) -> Path:
+        """记下生效的字体并清掉相关缓存。
+
+        字形缓存按字体对象的 id 记，换字体必须清，否则会跨代复用误判。
+        """
+        global _CUSTOM_FONT  # 单例式配置
+        _CUSTOM_FONT = path
+        _font_file.cache_clear()
+        font_for.cache_clear()
+        _GLYPH_CACHE.clear()
+        return path
 
     if _CUSTOM_FONT is not None and _CUSTOM_FONT.exists():
         return _CUSTOM_FONT
 
     local = cache_dir / FONT_NAME
-    if local.exists() and local.stat().st_size > 1_000_000:
-        if _matches_sources(local, FONT_SOURCES):
-            _CUSTOM_FONT = local
-            _font_file.cache_clear()
-            _font.cache_clear()
-            return local
-        local.unlink(missing_ok=True)  # 校验不过就重下，不留着用
+    if _cached_ok(local, FONT_SOURCES, 1_000_000):
+        return adopt(local)
 
     system = _font_file()
     if system is not None:
         return system
 
-    if url:
-        # 自定义地址没法预先知道 sha256，只能下下来就用；出问题由调用方负责。
-        if _fetch_font(FontSource(url, ""), local, 1_000_000):
-            _CUSTOM_FONT = local
-            _font_file.cache_clear()
-            _font.cache_clear()
-            return local
-    for source in FONT_SOURCES:
-        if _fetch_font(source, local, 1_000_000):
-            _CUSTOM_FONT = local
-            _font_file.cache_clear()
-            _font.cache_clear()
-            return local
+    if _ensure_downloaded(local, FONT_SOURCES, 1_000_000, url):
+        return adopt(local)
     logger.warning("[parsehub] 没有可用字体，卡片功能关闭")
     return None
