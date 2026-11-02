@@ -148,6 +148,33 @@ async def test_bilibili_music_cache_hit_keeps_file(
 
 
 @pytest.mark.asyncio
+async def test_bilibili_music_cache_hit_ignores_duration_limit(
+    plugin, instance, service, monkeypatch, tmp_path: Path, update_settings
+) -> None:
+    """200s 的歌在 60s 上限下仍能命中缓存，不重新解析 / 下载。"""
+    update_settings(max_seconds=60)
+    audio_path = tmp_path / "夜航星.m4a"
+    audio_path.write_bytes(b"audio")
+    calls: dict[str, int] = {}
+
+    _patch_parse(instance, monkeypatch, _music_result(), calls)
+    _patch_download(service, plugin, monkeypatch, audio_path, calls)
+
+    for group_id in (123456, 654321):
+        bot = FakeBot()
+        result = await service.handle(
+            instance,
+            bot,
+            make_group_event(MUSIC_URL, group_id=group_id),
+            MUSIC_URL,
+        )
+        assert [name for _, name in bot.uploaded_files()] == ["夜航星.m4a"]
+
+    assert result.outcome is service.Outcome.FROM_CACHE
+    assert calls == {"parse": 1, "download": 1}, calls
+
+
+@pytest.mark.asyncio
 async def test_bilibili_music_short_link_cache_hit_keeps_file(
     plugin, instance, service, monkeypatch, tmp_path: Path
 ) -> None:
