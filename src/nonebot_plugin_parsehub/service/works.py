@@ -21,11 +21,20 @@ from typing import TYPE_CHECKING, Any
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageEvent
 
-from .. import audio, bilibili_live, errors, feedback, keys, media, platforms
+from .. import (
+    audio,
+    bilibili,
+    bilibili_live,
+    errors,
+    feedback,
+    keys,
+    media,
+    platforms,
+)
 from ..budget import Budget
 from ..cache import CacheEntry
 from ..delivery import Sender
-from ..media import MAX_MEDIA_ITEMS, MediaFile, MediaRef
+from ..media import MAX_MEDIA_ITEMS, MediaFile, MediaKind, MediaRef
 from ..parsehub_client import platform_cookie
 from . import download, duration, message
 from .result import Outcome, Result
@@ -43,7 +52,8 @@ class _Work:
     session: str
     pre_key: str
     manual: bool
-    music: bool = False  # YouTube Music：发卡片 + record，不走视频下载
+    music: bool = False  # 音乐作品：卡片标「音乐」，不套视频时长上限
+    yt_music: bool = False  # YouTube Music：用 yt-dlp 只下音频，按 record 投递
     post_key: str = ""  # 解析结果链接的作品 key
     all_keys: tuple[str, ...] = ()  # pre_key 与 post_key 去重后的组合
     platform_id: str = ""  # 解析结果里的平台 id（拿不到时退回 platform）
@@ -98,7 +108,11 @@ async def deliver(
 
     entry = await _hit_cache(app, pre_key)
     if entry is not None:
-        return await _deliver_cached(app, sender, event, entry, (pre_key,))
+        # 音乐单曲的缓存条目也要按文件发，不能靠扩展名重新推断成 record。
+        kind = MediaKind.FILE if bilibili.is_music_url(url) else None
+        return await _deliver_cached(
+            app, sender, event, entry, (pre_key,), kind=kind
+        )
 
     result = await _parse_work(app, sender, event, work)
     if result is not None:
@@ -232,11 +246,16 @@ async def _parse_work(
 
     _fill_keys(work)
     raw_url = str(getattr(work.parsed, "raw_url", "") or "")
-    work.music = platforms.is_youtube_music(
+    work.yt_music = platforms.is_youtube_music(
         work.url
     ) or platforms.is_youtube_music(raw_url)
+    work.music = (
+        work.yt_music
+        or bilibili.is_music_url(work.url)
+        or bilibili.is_music_url(raw_url)
+    )
     if work.music:
-        # 卡片元信息据此显示「音乐」，而不是 ParseHub 默认的「视频」。
+        # 卡片元信息据此显示「音乐」，而不是按媒体类型推断。
         work.parsed.music = True
     logger.info(
         f"[parsehub] {work.display} 解析成功"
@@ -373,7 +392,10 @@ async def _apply_limits(
     # 短链没命中缓存（缓存里记的是展开后的 key），解析完再查一次。
     entry = await _hit_cache(app, work.post_key)
     if entry is not None:
-        return await _deliver_cached(app, sender, event, entry, work.all_keys)
+        kind = MediaKind.FILE if work.music and not work.yt_music else None
+        return await _deliver_cached(
+            app, sender, event, entry, work.all_keys, kind=kind
+        )
 
     work.total = len(work.refs)
     if not work.refs:
@@ -430,7 +452,7 @@ async def _download_and_deliver(
         download.download_music(
             app, work.url, work.proxy, work.cookie, work.budget
         )
-        if work.music
+        if work.yt_music
         else download.download_media(
             app, work.url, work.proxy, work.cookie, work.budget, work.parsed
         )
@@ -453,7 +475,7 @@ async def _download_and_deliver(
         if body:
             # 下载失败就没有转发块可挂正文，退回单独一条，别把正文吞掉。
             await app.delivery.send_text(sender, event, body)
-        if work.music and isinstance(download_error, audio.AudioTooLarge):
+        if work.yt_music and isinstance(download_error, audio.AudioTooLarge):
             return Result.fail(
                 Outcome.TOO_LARGE,
                 notice=feedback.audio_too_large_notice(
@@ -468,6 +490,18 @@ async def _download_and_deliver(
             ),
             keys=work.all_keys,
         )
+
+    if work.music and not work.yt_music:
+        # B 站音乐默认发文件：下载结果按 .m4a 扩展名会判成 record，
+        # 这里改回文件上传；.m4a 本身也确实是音频。
+        files = [
+            MediaFile(
+                path=file.path,
+                kind=MediaKind.FILE,
+                duration=file.duration,
+            )
+            for file in files
+        ]
 
     # 上面没出成卡就带上下载好的文件再试一次：图片直读、视频抽帧
     if not info.sent:
@@ -512,10 +546,20 @@ async def _deliver_cached(
     event: MessageEvent,
     entry: CacheEntry,
     keys: tuple[str, ...],
+    *,
+    kind: MediaKind | None = None,
 ) -> Result:
     """把缓存里的卡片 / 文字 + 媒体直接发出去。
 
     卡片被关掉或发卡失败时，仍要发缓存里的文字——之前会丢掉正文的地方。
+
+    Args:
+        app: 插件实例。
+        sender: 协议端接口。
+        event: 触发消息事件。
+        entry: 缓存条目。
+        keys: 本次命中的作品 key。
+        kind: 强制投递方式；``None`` 按扩展名推断（音乐缓存要按文件发）。
     """
     settings = app.settings
     for key in keys:
@@ -530,7 +574,8 @@ async def _deliver_cached(
         await app.delivery.send_text(sender, event, caption)
 
     files = [
-        MediaFile(path=path, kind=media.kind_of(path)) for path in entry.files
+        MediaFile(path=path, kind=kind or media.kind_of(path))
+        for path in entry.files
     ]
     logger.info(f"[parsehub] 命中媒体缓存，直接发送 {len(files)} 个文件")
     report = await app.delivery.send_media(
