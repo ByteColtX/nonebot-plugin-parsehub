@@ -167,7 +167,7 @@ def audio_too_large_notice(size: int) -> str:
 
 def audio_usage_bili() -> str:
     """Bm 命令的用法提示。"""
-    return "用法：bm <BV/AV 号或 B 站链接>（-f 以文件发送）"
+    return "用法：bm <BV/AV 号、B 站视频或音乐链接>（-f 以文件发送）"
 
 
 def audio_usage_yt() -> str:

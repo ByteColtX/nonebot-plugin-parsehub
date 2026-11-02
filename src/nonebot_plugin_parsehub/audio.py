@@ -8,6 +8,8 @@ ParseHub 不提供「只要音频」的解析，这里自己调两条链路：
 - B 站：``finger/spi`` 拿 buvid 规避风控（同 ParseHub 的 ``BiliAPI``），
   ``view`` 拿 cid / 标题，``playurl fnval=16`` 拿 DASH 独立音频流，直接下载。
   免登录封顶 192kbps（30280），Dolby / Hi-Res 需要大会员，不追。
+- B 站音乐单曲（``/audio/au<号>``）：``song/info`` 拿标题与时长，``url``
+  拿直链；音频 CDN 没有 Referer 会 403，下载复用同一套请求头。
 - YouTube：parsehub 本来就用 yt-dlp 子进程，这里直接以同样方式调
   ``-f "bestaudio[ext=m4a]/bestaudio"``，容器原生无需转码。
 
@@ -46,6 +48,9 @@ from .bilibili import (
 )
 from .bilibili import (
     bvid_of as _bvid_of,
+)
+from .bilibili import (
+    music_id as _music_id,
 )
 from .bilibili import (
     video_url as _video_url,
@@ -87,6 +92,8 @@ _BILI_HEADERS = {
 _SPI_URL = "https://api.bilibili.com/x/frontend/finger/spi"
 _VIEW_URL = "https://api.bilibili.com/x/web-interface/view"
 _PLAYURL_URL = "https://api.bilibili.com/x/player/playurl"
+_MUSIC_INFO_URL = "https://www.bilibili.com/audio/music-service-c/web/song/info"
+_MUSIC_URL_URL = "https://www.bilibili.com/audio/music-service-c/web/url"
 _HTTP_TIMEOUT = 30.0
 
 # yt-dlp 元信息解析的超时（秒）。
@@ -118,6 +125,25 @@ class BiliAudio:
     duration: int
     audio_url: str
     bandwidth: int
+
+
+@dataclass(frozen=True)
+class BiliMusic:
+    """一个 B 站音乐单曲的音频元信息。
+
+    Attributes:
+        title: 歌曲名。
+        sid: 音乐编号（``au`` 后面的数字）。
+        duration: 时长（秒）。
+        audio_url: 音频直链（签名会过期，拿到后尽快下载）。
+        ext: 落盘扩展名（不带点）。
+    """
+
+    title: str
+    sid: str
+    duration: int
+    audio_url: str
+    ext: str
 
 
 @dataclass(frozen=True)
@@ -171,12 +197,13 @@ def _host_in(host: str, hosts: tuple[str, ...]) -> bool:
 
 
 def extract_bilibili(text: str) -> str | None:
-    """从命令参数里挑出 B 站视频目标。
+    """从命令参数里挑出 B 站音频目标。
 
-    认完整链接（``bilibili.com/video/BVxxx``，分P参数保留）、短链
-    （``b23.tv``，展开推迟到获取阶段）、裸 BV 号和裸 AV 号；动态 / 专栏
-    不算目标。AV 号是老编号，这里换算成等价的 BV 号，和 BV 链接共用同一
-    份 key / 缓存。多个目标时取最先出现的。
+    认完整链接（``bilibili.com/video/BVxxx``，分P参数保留）、音乐单曲
+    （``bilibili.com/audio/au<号>``）、短链（``b23.tv``，展开推迟到获取
+    阶段）、裸 BV 号和裸 AV 号；动态 / 专栏 / 专辑 / 首页不算目标。AV 号是
+    老编号，这里换算成等价的 BV 号，和 BV 链接共用同一份 key / 缓存。多个
+    目标时取最先出现的。
 
     Args:
         text: 剩余命令参数，可以是分享文案。
@@ -194,6 +221,8 @@ def extract_bilibili(text: str) -> str | None:
         if not _host_in(host, _BILI_HOSTS):
             continue
         if _host_in(host, _BILI_SHORT_HOSTS):
+            candidates.append((match.start(), url))
+        elif _music_id(url) is not None:
             candidates.append((match.start(), url))
         elif _BV_RE.search(url):
             candidates.append((match.start(), url))
@@ -326,6 +355,26 @@ def _get_json(
     return payload.get("data") or {}
 
 
+def _buvid_cookies(client: httpx.Client) -> dict[str, str]:
+    """拿一次匿名指纹 cookie（同 ParseHub BiliAPI 的做法）。
+
+    Args:
+        client: 复用的 httpx 客户端。
+
+    Returns:
+        ``buvid3`` / ``buvid4``；拿不到时为空字典（不该拦住解析）。
+    """
+    try:
+        spi = client.get(_SPI_URL).json()
+        return {
+            "buvid3": spi["data"]["b_3"],
+            "buvid4": spi["data"]["b_4"],
+        }
+    except Exception as exc:  # 风控指纹拿不到不该拦住解析
+        logger.debug(f"[parsehub] buvid 获取失败（忽略）: {exc}")
+        return {}
+
+
 def bilibili_audio(url: str, proxy: str = "") -> BiliAudio:
     """获取一个 B 站视频的音频元信息（含直链）。
 
@@ -347,16 +396,7 @@ def bilibili_audio(url: str, proxy: str = "") -> BiliAudio:
         proxy=proxy or None,
         headers=_BILI_HEADERS,
     ) as client:
-        # buvid 规避风控（同 ParseHub BiliAPI 的做法）；拿不到就裸着试
-        try:
-            spi = client.get(_SPI_URL).json()
-            cookies = {
-                "buvid3": spi["data"]["b_3"],
-                "buvid4": spi["data"]["b_4"],
-            }
-        except Exception as exc:  # 风控指纹拿不到不该拦住解析
-            logger.debug(f"[parsehub] buvid 获取失败（忽略）: {exc}")
-            cookies = {}
+        cookies = _buvid_cookies(client)
 
         if _host_in(_host_of(url), _BILI_SHORT_HOSTS):
             url = str(client.get(url).url)
@@ -406,6 +446,54 @@ def bilibili_audio(url: str, proxy: str = "") -> BiliAudio:
             audio_url=audio_url,
             bandwidth=int(best.get("bandwidth") or 0),
         )
+
+
+def _music_ext(url: str) -> str:
+    """取音乐直链的扩展名，取不到时按 m4a 处理。"""
+    suffix = Path(urlsplit(url).path).suffix
+    return suffix.removeprefix(".").lower() or "m4a"
+
+
+def bilibili_music(url: str, proxy: str = "") -> BiliMusic:
+    """获取一个 B 站音乐单曲的元信息（含直链）。
+
+    只认单曲页 ``/audio/au<号>``；音频直链同样带签名，拿到后应尽快下载。
+
+    Args:
+        url: 音乐单曲链接。
+        proxy: 请求代理；空串表示直连。
+
+    Returns:
+        音乐元信息。
+
+    Raises:
+        RuntimeError: 不是音乐链接、曲目不存在 / 已下架、没有播放地址或
+            被风控。
+    """
+    sid = _music_id(url)
+    if sid is None:
+        raise RuntimeError("不是 B 站音乐链接（只支持 /audio/au<号>）")
+    with httpx.Client(
+        timeout=_HTTP_TIMEOUT,
+        follow_redirects=True,
+        proxy=proxy or None,
+        headers=_BILI_HEADERS,
+    ) as client:
+        cookies = _buvid_cookies(client)
+        info = _get_json(client, _MUSIC_INFO_URL, {"sid": sid}, cookies)
+        play = _get_json(client, _MUSIC_URL_URL, {"sid": sid}, cookies)
+
+    cdns = play.get("cdns") or []
+    if not cdns:
+        raise RuntimeError("获取音乐链接失败")
+    audio_url = str(cdns[0])
+    return BiliMusic(
+        title=str(info.get("title") or ""),
+        sid=sid,
+        duration=int(info.get("duration") or 0),
+        audio_url=audio_url,
+        ext=_music_ext(audio_url),
+    )
 
 
 def download_bilibili(

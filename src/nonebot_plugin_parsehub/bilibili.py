@@ -10,6 +10,9 @@ AV 号（``av170001``）是 B 站的老编号，和 BV 号指向同一个作品�
 换算是纯位运算（见 :func:`av_to_bvid`），所以插件内统一先把 AV 号换成 BV
 号，再去请求、去重和缓存：同一条视频不管用户发的是哪种编号，都落到同一个
 作品 key 上。
+
+音乐单曲页（``/audio/au<号>``）是独立的作品类型，只认单曲：首页与专辑
+（``/audio/am<号>``）不是可解析的内容。
 """
 
 from __future__ import annotations
@@ -38,6 +41,11 @@ BV_PATTERN: re.Pattern[str] = re.compile(
 # 裸 AV 号（老编号）：同样卡前后边界；分组 1 是数字部分。
 AV_PATTERN: re.Pattern[str] = re.compile(
     r"(?<![0-9A-Za-z])[aA][vV](\d+)(?![0-9A-Za-z])"
+)
+
+# 音乐单曲页：``/audio/au<号>``。专辑（``am``）与首页不匹配。
+MUSIC_PATTERN: re.Pattern[str] = re.compile(
+    r"bilibili\.com/audio/au(\d+)", re.IGNORECASE
 )
 
 # AV → BV 的位运算常量，取自 B 站的公开换算方式。
@@ -95,6 +103,31 @@ def bvid_of(text: str) -> str | None:
     if match:
         return av_to_bvid_safe(int(match.group(1)))
     return None
+
+
+def music_id(url: str) -> str | None:
+    """取音乐单曲页里的编号（纯字符串处理，不发请求）。
+
+    Args:
+        url: 链接。
+
+    Returns:
+        ``au`` 后面的数字；不是音乐单曲页时为 ``None``。
+    """
+    match = MUSIC_PATTERN.search(url or "")
+    return match.group(1) if match else None
+
+
+def is_music_url(url: str) -> bool:
+    """链接是不是 B 站音乐单曲页。
+
+    Args:
+        url: 链接。
+
+    Returns:
+        命中 ``/audio/au<号>`` 返回 True；专辑与首页返回 False。
+    """
+    return music_id(url) is not None
 
 
 def video_url(bvid: str, source: str = "") -> str:

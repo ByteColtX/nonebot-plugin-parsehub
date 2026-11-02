@@ -21,6 +21,7 @@ from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageEvent
 
 from .. import audio, errors, feedback, media
+from ..bilibili import is_music_url
 from ..budget import Budget
 from ..cache import CacheEntry
 from ..delivery import MediaReport, Sender
@@ -31,12 +32,12 @@ if TYPE_CHECKING:
     from ..app import App
 
 # 两个平台的音频元信息。
-type AudioInfo = audio.BiliAudio | audio.YtAudio
+type AudioInfo = audio.BiliAudio | audio.BiliMusic | audio.YtAudio
 
 # 取数：async (target, proxy, cookie, cookie_dir, budget) -> AudioInfo
 type _Fetch = Callable[[str, str, str, Path, Budget], Awaitable[AudioInfo]]
-# 体积预估：(info) -> 字节数；None 表示这个平台估不出来
-type _Estimate = Callable[[AudioInfo], int] | None
+# 体积预估：(info) -> 字节数；估不出来为 None
+type _Estimate = Callable[[AudioInfo], int | None] | None
 # 下载：async (info, task_dir, proxy, cookie, cookie_dir, budget, max_bytes)
 # -> 落盘路径
 type _Download = Callable[
@@ -66,13 +67,16 @@ async def _fetch_bilibili(
     _cookie_dir: Path,
     budget: Budget,
 ) -> AudioInfo:
-    """B 站 playurl 接口取音频元信息（吃操作预算）。"""
+    """B 站接口取元信息：视频走 playurl，音乐单曲走歌曲接口（吃操作预算）。"""
+    fetch = (
+        audio.bilibili_music if is_music_url(target) else audio.bilibili_audio
+    )
     async with budget.timeout():
-        return await asyncio.to_thread(audio.bilibili_audio, target, proxy)
+        return await asyncio.to_thread(fetch, target, proxy)
 
 
 async def _download_bilibili(
-    info: audio.BiliAudio,
+    info: audio.BiliAudio | audio.BiliMusic,
     task_dir: Path,
     proxy: str,
     cookie: str,
@@ -81,8 +85,12 @@ async def _download_bilibili(
     max_bytes: int,
 ) -> Path:
     """下载 B 站音频到任务目录（吃操作预算；cookie 不参与）。"""
-    stem = audio.file_stem(info.title, info.bvid, info.part)
-    dest = task_dir / f"{stem}.m4a"
+    if isinstance(info, audio.BiliMusic):
+        stem = audio.file_stem(info.title, f"au{info.sid}")
+        dest = task_dir / f"{stem}.{info.ext}"
+    else:
+        stem = audio.file_stem(info.title, info.bvid, info.part)
+        dest = task_dir / f"{stem}.m4a"
     async with budget.timeout():
         return Path(
             await asyncio.to_thread(
@@ -147,10 +155,17 @@ async def _download_youtube(
         return path
 
 
+def _estimate_bilibili(info: AudioInfo) -> int | None:
+    """按码率 × 时长预估 B 站视频音频体积；音乐接口不给码率，估不出来。"""
+    if isinstance(info, audio.BiliAudio):
+        return info.bandwidth // 8 * info.duration
+    return None
+
+
 _SOURCES: dict[str, AudioSource] = {
     "bilibili": AudioSource(
         fetch=_fetch_bilibili,
-        estimate=lambda info: info.bandwidth // 8 * info.duration,
+        estimate=_estimate_bilibili,
         download=_download_bilibili,
     ),
     "youtube": AudioSource(
@@ -362,7 +377,7 @@ def _estimated_bytes(
     if not limit or source.estimate is None:
         return None
     estimated = source.estimate(info)
-    if estimated > limit:
+    if estimated is not None and estimated > limit:
         return estimated
     return None
 
