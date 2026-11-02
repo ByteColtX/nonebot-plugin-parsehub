@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageEvent
 
-from .. import audio, errors, feedback, media
+from .. import audio, bilibili_live, errors, feedback, media
 from ..bilibili import is_music_url
 from ..budget import Budget
 from ..cache import CacheEntry
@@ -68,10 +68,20 @@ async def _fetch_bilibili(
     budget: Budget,
 ) -> AudioInfo:
     """B 站接口取元信息：视频走 playurl，音乐单曲走歌曲接口（吃操作预算）。"""
-    fetch = (
-        audio.bilibili_music if is_music_url(target) else audio.bilibili_audio
-    )
     async with budget.timeout():
+        if bilibili_live.is_short_link(target):
+            # 短链不带作品信息，先展开才知道该走视频还是音乐接口。
+            target = (
+                await asyncio.to_thread(
+                    bilibili_live.expand_short, target, proxy
+                )
+                or target
+            )
+        fetch = (
+            audio.bilibili_music
+            if is_music_url(target)
+            else audio.bilibili_audio
+        )
         return await asyncio.to_thread(fetch, target, proxy)
 
 
