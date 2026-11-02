@@ -176,13 +176,14 @@ async def _hit_cache(app: App, key: str) -> CacheEntry | None:
     """查作品缓存；超时长上限的条目当没命中。
 
     短链命中（解析前）与 post_key 命中（解析后）都走这里，共用同一道时长
-    上限检查——超长条目从哪条路都不能直接发。
+    上限检查——超长条目从哪条路都不能直接发。音乐作品不套视频时长上限，
+    按条目里的作品 key 放行。
     """
     entry = await asyncio.to_thread(app.cache.get, key)
     if entry is None:
         return None
     limit = app.settings.max_seconds
-    if limit and entry.seconds > limit:
+    if limit and entry.seconds > limit and not _cached_music(entry):
         return None
     if (
         limit
@@ -436,6 +437,7 @@ async def _apply_limits(
 async def _size_gate(app: App, work: _Work) -> Result | None:
     """单媒体时先探测体积，超上限就不下载；继续时返回 ``None``。"""
     if work.music or len(work.refs) != 1:
+        # 音乐不设体积上限：解析结果（MusicRef）不返回体积，暂时不限制。
         return None
     oversized = await download.oversized_size(app, work.refs[0], work.proxy)
     if oversized:
