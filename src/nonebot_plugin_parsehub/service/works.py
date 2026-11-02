@@ -108,8 +108,13 @@ async def deliver(
 
     entry = await _hit_cache(app, pre_key)
     if entry is not None:
-        # 音乐单曲的缓存条目也要按文件发，不能靠扩展名重新推断成 record。
-        kind = MediaKind.FILE if bilibili.is_music_url(url) else None
+        # 音乐单曲的缓存条目也要按文件发，不能靠扩展名重新推断成 record；
+        # 短链的 pre_key 不带 au 号，得从条目记的作品 key 里认。
+        kind = (
+            MediaKind.FILE
+            if bilibili.is_music_url(url) or _cached_music(entry)
+            else None
+        )
         return await _deliver_cached(
             app, sender, event, entry, (pre_key,), kind=kind
         )
@@ -160,6 +165,11 @@ async def _try_live(
     post_key = keys.content_key(bilibili_live.live_url(info.room_id))
     logger.info(f"[parsehub] 直播间封面卡片已发送: {url}")
     return Result(Outcome.DELIVERED, keys=(pre_key, post_key))
+
+
+def _cached_music(entry: CacheEntry) -> bool:
+    """缓存条目是不是音乐作品（短链 key 本身看不出类型）。"""
+    return any(key.startswith(keys.MUSIC_KEY_PREFIX) for key in entry.keys)
 
 
 async def _hit_cache(app: App, key: str) -> CacheEntry | None:

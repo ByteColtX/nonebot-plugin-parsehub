@@ -203,11 +203,14 @@ _AV_ID_PATTERN = re.compile(r"/av(\d+)")
 
 # 平台内容的 ID 特征：命中就能把同一个作品的各种写法归一成同一个 key。
 # 顺序有意义，更具体的排前面（直播间 > 动态 > opus > BV > AV）。
+# 音乐单曲独立命名空间：号段不与视频 / 动态混，缓存按前缀认音乐。
+MUSIC_NAMESPACE = "bilibili_music"
+MUSIC_KEY_PREFIX = f"{MUSIC_NAMESPACE}:"
 _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # 直播间：live.bilibili.com/<room_id>，与视频共用 bilibili 平台但独立成 key
     ("bilibili_live", re.compile(r"live\.bilibili\.com/(\d+)")),
     # B 站音乐单曲：独立命名空间，不与视频 / 动态的号段混
-    ("bilibili_music", _MUSIC_ID_PATTERN),
+    (MUSIC_NAMESPACE, _MUSIC_ID_PATTERN),
     # B 站动态：18–19 位数字
     ("bilibili", re.compile(r"bilibili\.com/(\d{18,19})(?:[/?#]|$)")),
     # B 站专栏
