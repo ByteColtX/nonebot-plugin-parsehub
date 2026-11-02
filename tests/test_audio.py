@@ -19,6 +19,7 @@ from nonebot.adapters.onebot.v11 import Bot
 _BILI_URL = "https://www.bilibili.com/video/BV1A2xL67EMP"
 _BILI_CANONICAL = "https://www.bilibili.com/video/BV1A2xL67EMP"
 _BILI_MUSIC_URL = "https://www.bilibili.com/audio/au2854883"
+_BILI_SHORT_URL = "https://b23.tv/w8J4aMY"
 _YT_URL = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
 
 
@@ -707,6 +708,38 @@ async def test_handle_audio_bm_music_second_call_hits_cache(
         assert len(bot.sent_records) == 1
 
     assert calls == {"fetch": 1, "download": 1}, calls
+
+
+@pytest.mark.asyncio
+async def test_handle_audio_bm_music_short_link(
+    plugin, monkeypatch, instance, service
+):
+    """指向音乐页的短链：先展开再选歌曲接口，不发视频请求。"""
+    calls: dict[str, int] = {}
+    _patch_bili_music(monkeypatch, plugin, calls)
+    monkeypatch.setattr(
+        plugin.bilibili_live,
+        "expand_short",
+        lambda url, proxy="": _BILI_MUSIC_URL,
+    )
+
+    def fail_video(*args, **kwargs):
+        raise AssertionError("短链音乐不该走视频接口")
+
+    monkeypatch.setattr(plugin.audio, "bilibili_audio", fail_video)
+
+    bot = FakeBot()
+    result = await service.handle_audio(
+        instance,
+        bot,
+        make_group_event(f"bm {_BILI_SHORT_URL}"),
+        _BILI_SHORT_URL,
+        "bilibili",
+    )
+
+    assert result.outcome is service.Outcome.DELIVERED
+    assert len(bot.sent_records) == 1
+    assert calls == {"fetch": 1, "download": 1}
 
 
 @pytest.mark.asyncio
