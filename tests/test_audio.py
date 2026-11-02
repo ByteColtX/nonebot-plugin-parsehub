@@ -18,6 +18,7 @@ from nonebot.adapters.onebot.v11 import Bot
 
 _BILI_URL = "https://www.bilibili.com/video/BV1A2xL67EMP"
 _BILI_CANONICAL = "https://www.bilibili.com/video/BV1A2xL67EMP"
+_BILI_MUSIC_URL = "https://www.bilibili.com/audio/au2854883"
 _YT_URL = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
 
 
@@ -49,6 +50,20 @@ def _yt_info(**overrides):
     return YtAudio(**fields)
 
 
+def _bili_music_info(**overrides):
+    from nonebot_plugin_parsehub.audio import BiliMusic
+
+    fields = {
+        "title": "夜航星",
+        "sid": "2854883",
+        "duration": 200,
+        "audio_url": "https://cdn.example.com/music.m4a",
+        "ext": "m4a",
+    }
+    fields.update(overrides)
+    return BiliMusic(**fields)
+
+
 def _patch_bili(monkeypatch, plugin, calls=None, **overrides) -> None:
     """把 B 站音频获取与下载换成假实现。"""
     info = _bili_info(**overrides)
@@ -65,6 +80,25 @@ def _patch_bili(monkeypatch, plugin, calls=None, **overrides) -> None:
         return dest
 
     monkeypatch.setattr(plugin.audio, "bilibili_audio", fake_fetch)
+    monkeypatch.setattr(plugin.audio, "download_bilibili", fake_download)
+
+
+def _patch_bili_music(monkeypatch, plugin, calls=None, **overrides) -> None:
+    """把 B 站音乐获取与下载换成假实现。"""
+    info = _bili_music_info(**overrides)
+
+    def fake_fetch(url, proxy=""):
+        if calls is not None:
+            calls["fetch"] = calls.get("fetch", 0) + 1
+        return info
+
+    def fake_download(audio_url, dest: Path, proxy="", max_bytes=0, timeout=0):
+        if calls is not None:
+            calls["download"] = calls.get("download", 0) + 1
+        dest.write_bytes(b"\x00\x00\x00 ftypiso5" + b"a" * 1024)
+        return dest
+
+    monkeypatch.setattr(plugin.audio, "bilibili_music", fake_fetch)
     monkeypatch.setattr(plugin.audio, "download_bilibili", fake_download)
 
 
@@ -154,6 +188,17 @@ def test_extract_bilibili_none_for_plain_text(audio):
     """普通聊天文本提不出目标。"""
     assert audio.extract_bilibili("今天天气不错") is None
     assert audio.extract_bilibili("") is None
+
+
+def test_extract_bilibili_music_link(audio):
+    """音乐单曲链接原样返回；专辑与首页不算目标。"""
+    assert audio.extract_bilibili(_BILI_MUSIC_URL) == _BILI_MUSIC_URL
+    assert audio.extract_bilibili(f"好听的歌 {_BILI_MUSIC_URL}") == (
+        _BILI_MUSIC_URL
+    )
+    assert (
+        audio.extract_bilibili("https://www.bilibili.com/audio/am1001") is None
+    )
 
 
 def test_extract_bilibili_prefers_first(audio):
@@ -453,6 +498,11 @@ def test_cache_key_includes_part(audio):
     )
 
 
+def test_cache_key_bilibili_music(audio):
+    """音乐 key 用 au 号，与视频缓存隔开。"""
+    assert audio.cache_key(_BILI_MUSIC_URL) == "audio:bilibili_music:2854883"
+
+
 def test_cache_key_youtube_variants(audio):
     """YouTube 的各种写法归一成同一个音频 key，ID 大小写保留。"""
     assert audio.cache_key("https://youtu.be/aqz-KE-bpKQ") == (
@@ -590,6 +640,73 @@ async def test_handle_audio_bm_part_suffix_in_filename(
 
     _, name = bot.uploaded_files()[0]
     assert name == "《原神》过场动画-「遗赠」 - P2.m4a"
+
+
+@pytest.mark.asyncio
+async def test_handle_audio_bm_music_sends_record(
+    plugin, monkeypatch, instance, service
+):
+    """bm 音乐链接默认发 record，缓存 key 用 au 号。"""
+    calls: dict[str, int] = {}
+    _patch_bili_music(monkeypatch, plugin, calls)
+
+    bot = FakeBot()
+    result = await service.handle_audio(
+        instance,
+        bot,
+        make_group_event(f"bm {_BILI_MUSIC_URL}"),
+        _BILI_MUSIC_URL,
+        "bilibili",
+    )
+
+    assert result.outcome is service.Outcome.DELIVERED
+    assert len(bot.sent_records) == 1
+    assert "audio:bilibili_music:2854883" in result.keys
+    assert calls == {"fetch": 1, "download": 1}
+
+
+@pytest.mark.asyncio
+async def test_handle_audio_bm_music_file_option(
+    plugin, monkeypatch, instance, service
+):
+    """bm -f 音乐链接以文件发送，文件名是清洗后的歌曲名。"""
+    _patch_bili_music(monkeypatch, plugin)
+
+    bot = FakeBot()
+    await service.handle_audio(
+        instance,
+        bot,
+        make_group_event(f"bm -f {_BILI_MUSIC_URL}"),
+        _BILI_MUSIC_URL,
+        "bilibili",
+        as_file=True,
+    )
+
+    assert bot.sent_records == []
+    _, name = bot.uploaded_files()[0]
+    assert name == "夜航星.m4a"
+
+
+@pytest.mark.asyncio
+async def test_handle_audio_bm_music_second_call_hits_cache(
+    plugin, monkeypatch, instance, service
+):
+    """同一首音乐第二次直接发缓存，不再请求歌曲接口。"""
+    calls: dict[str, int] = {}
+    _patch_bili_music(monkeypatch, plugin, calls)
+
+    for _ in range(2):
+        bot = FakeBot()
+        await service.handle_audio(
+            instance,
+            bot,
+            make_group_event(f"bm {_BILI_MUSIC_URL}"),
+            _BILI_MUSIC_URL,
+            "bilibili",
+        )
+        assert len(bot.sent_records) == 1
+
+    assert calls == {"fetch": 1, "download": 1}, calls
 
 
 @pytest.mark.asyncio
@@ -797,6 +914,75 @@ def test_bilibili_audio_converts_av_before_request(audio, monkeypatch):
 
     assert info.bvid == "BV1oxxY69Es4"
     assert requested == ["BV1oxxY69Es4", "BV1oxxY69Es4"]
+
+
+def test_bilibili_music_fetches_song_info_and_url(audio, monkeypatch):
+    """音乐取数走 song/info + url，标题 / 时长 / 直链都带回来。"""
+    requested: list[tuple[str, str]] = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, payload: dict):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            pass
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, params=None, **kwargs):
+            if url == audio._SPI_URL:
+                return Response({"data": {"b_3": "b3", "b_4": "b4"}})
+            requested.append((url, params["sid"]))
+            if url == audio._MUSIC_INFO_URL:
+                return Response(
+                    {
+                        "code": 0,
+                        "data": {"title": "夜航星", "duration": 200},
+                    }
+                )
+            return Response(
+                {
+                    "code": 0,
+                    "data": {
+                        "cdns": [
+                            "https://cdn.example.com/a.m4a?auth_key=1",
+                            "https://cdn.example.com/b.m4a",
+                        ]
+                    },
+                }
+            )
+
+    monkeypatch.setattr(audio.httpx, "Client", Client)
+    info = audio.bilibili_music(_BILI_MUSIC_URL)
+
+    assert info.title == "夜航星"
+    assert info.sid == "2854883"
+    assert info.duration == 200
+    assert info.audio_url == "https://cdn.example.com/a.m4a?auth_key=1"
+    assert info.ext == "m4a"
+    assert requested == [
+        (audio._MUSIC_INFO_URL, "2854883"),
+        (audio._MUSIC_URL_URL, "2854883"),
+    ]
+
+
+def test_bilibili_music_rejects_non_music_link(audio):
+    """视频链接不能当音乐取数，避免打到歌曲接口。"""
+    with pytest.raises(RuntimeError, match="音乐"):
+        audio.bilibili_music(_BILI_URL)
 
 
 @pytest.mark.asyncio
@@ -1199,7 +1385,7 @@ async def test_bm_matcher_no_target_shows_usage(
         ctx.receive_event(bot, event)
         ctx.should_call_send(
             event,
-            "用法：bm <BV/AV 号或 B 站链接>（-f 以文件发送）",
+            "用法：bm <BV/AV 号、B 站视频或音乐链接>（-f 以文件发送）",
             result=None,
             bot=bot,
         )

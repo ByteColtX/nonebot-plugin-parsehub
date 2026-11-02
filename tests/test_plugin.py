@@ -173,6 +173,30 @@ def test_extract_urls_accepts_new_supported_shapes(plugin, keys):
     ]
 
 
+def test_extract_urls_accepts_bilibili_music(plugin, keys):
+    """B 站音乐单曲页触发解析；专辑与首页不触发。"""
+    text = (
+        "音乐 https://www.bilibili.com/audio/au2854883 "
+        "专辑 https://www.bilibili.com/audio/am1001 "
+        "首页 https://www.bilibili.com/audio"
+    )
+    assert keys.extract_urls(text) == [
+        "https://www.bilibili.com/audio/au2854883"
+    ]
+
+
+def test_content_key_bilibili_music(plugin, keys):
+    """音乐单曲独立成 key，与视频 / 动态的号段不混。"""
+    assert (
+        keys.content_key("https://www.bilibili.com/audio/au2854883")
+        == "bilibili_music:2854883"
+    )
+    assert (
+        keys.content_key("https://m.bilibili.com/audio/au2854883?from=x")
+        == "bilibili_music:2854883"
+    )
+
+
 def test_content_key_bilibili_opus_and_dynamic(plugin, keys):
     """B 站专栏和动态也能归一成独立 key。"""
     assert (

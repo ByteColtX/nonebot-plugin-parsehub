@@ -41,8 +41,8 @@ triggers ──► service（run / works / audio / download / message / result�
 src/nonebot_plugin_parsehub/
 ├── triggers.py         # matcher / 命令：只决定「处理谁」
 ├── service/            # 编排：works / audio / download / message / run / result
-├── audio.py            # bm / ym 音频提取（B 站 playurl / yt-dlp）
-├── bilibili.py         # B 站常量与编号换算（域名 / BV·AV 正则 / AV→BV，单一来源）
+├── audio.py            # bm / ym 音频提取（B 站 playurl / 音乐接口 / yt-dlp）
+├── bilibili.py         # B 站常量与编号换算（域名 / BV·AV·音乐正则 / AV→BV，单一来源）
 ├── bilibili_live.py    # B 站直播间封面卡片
 ├── delivery.py         # 三种上传模式 + 合并转发/逐条 + 统一失败记账
 ├── feedback.py         # 表情回应与用户提示文案
@@ -86,6 +86,8 @@ src/nonebot_plugin_parsehub/
 - **配置启动时校验**：`Config` 用 pydantic 下界校验，`Settings` 是归一化只读快照。
 - **音频不设时长上限**：纯音频远小于视频，只按体积上限（`max_file_bytes`）；
   但取数与下载都吃操作超时预算（`PARSEHUB_TIMEOUT`），和常规视频下载同等待遇。
+  音乐作品（YouTube Music / B 站 `au` 链接）同样不套视频时长上限：YouTube
+  Music 由 yt-dlp 取音频发 `record`，B 站音乐走 ParseHub 下载、默认发文件。
 - **没给时长时在下载前探测**：视频号 / Threads 必现（接口不返回 duration，
   解析结果恒为 0），其它平台偶发；`service/duration` 用 ffmpeg 只读容器头
   （不给输出文件，不落盘、不拉完整文件，实测每次 <0.4MB、<0.5s）补出时长，

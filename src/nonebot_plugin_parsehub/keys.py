@@ -18,6 +18,9 @@ from collections.abc import Iterator
 from urllib.parse import parse_qsl, urlsplit
 
 from .bilibili import (
+    MUSIC_PATTERN as _MUSIC_ID_PATTERN,
+)
+from .bilibili import (
     SHORT_HOSTS as _BILIBILI_SHORT_HOSTS,
 )
 from .bilibili import (
@@ -80,6 +83,11 @@ _URL_SHAPES: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"^https?://(www\.|m\.|t\.)?bilibili\.com/"
         r"(video/|opus/|\d{18,19})",
+        re.IGNORECASE,
+    ),
+    # B 站音乐单曲（/audio/au<号>）；首页与专辑 /audio/am<号> 不匹配
+    re.compile(
+        r"^https?://(www\.|m\.|t\.)?bilibili\.com/audio/au\d+",
         re.IGNORECASE,
     ),
     # B 站直播间（插件自己处理，上游不支持）
@@ -198,6 +206,8 @@ _AV_ID_PATTERN = re.compile(r"/av(\d+)")
 _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # 直播间：live.bilibili.com/<room_id>，与视频共用 bilibili 平台但独立成 key
     ("bilibili_live", re.compile(r"live\.bilibili\.com/(\d+)")),
+    # B 站音乐单曲：独立命名空间，不与视频 / 动态的号段混
+    ("bilibili_music", _MUSIC_ID_PATTERN),
     # B 站动态：18–19 位数字
     ("bilibili", re.compile(r"bilibili\.com/(\d{18,19})(?:[/?#]|$)")),
     # B 站专栏
