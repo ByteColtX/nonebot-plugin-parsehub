@@ -14,6 +14,7 @@ from fake import make_group_event
 from fakes import FakeBot
 
 MUSIC_URL = "https://www.bilibili.com/audio/au2854883"
+SHORT_URL = "https://b23.tv/w8J4aMY"
 
 
 class FakeMusicRef:
@@ -138,6 +139,38 @@ async def test_bilibili_music_cache_hit_keeps_file(
         second,
         make_group_event(MUSIC_URL, group_id=654321),
         MUSIC_URL,
+    )
+
+    assert result.outcome is service.Outcome.FROM_CACHE
+    assert calls == {"parse": 1, "download": 1}, calls
+    assert second.sent_records == []
+    assert [name for _, name in second.uploaded_files()] == ["夜航星.m4a"]
+
+
+@pytest.mark.asyncio
+async def test_bilibili_music_short_link_cache_hit_keeps_file(
+    plugin, instance, service, monkeypatch, tmp_path: Path
+) -> None:
+    """短链进来的音乐，靠条目里的作品 key 认出类型，重发仍是文件。"""
+    audio_path = tmp_path / "夜航星.m4a"
+    audio_path.write_bytes(b"audio")
+    calls: dict[str, int] = {}
+
+    _patch_parse(instance, monkeypatch, _music_result(), calls)
+    _patch_download(service, plugin, monkeypatch, audio_path, calls)
+
+    first = FakeBot()
+    await service.handle(
+        instance, first, make_group_event(SHORT_URL), SHORT_URL
+    )
+    assert [name for _, name in first.uploaded_files()] == ["夜航星.m4a"]
+
+    second = FakeBot()
+    result = await service.handle(
+        instance,
+        second,
+        make_group_event(SHORT_URL, group_id=654321),
+        SHORT_URL,
     )
 
     assert result.outcome is service.Outcome.FROM_CACHE
