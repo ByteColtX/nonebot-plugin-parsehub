@@ -25,8 +25,9 @@ dependencies = [
   # 卡片渐变遮罩与视频抽帧是代码里直接 import 的，必须显式声明
   "numpy>=2.0.0,<3.0.0",
   "opencv-python-headless>=4.13.0.92",
-  "parsehub>=2.4.0,<3.0.0",
-  "pillow>=12.1.0,<13.0.0",
+  # 2.4.1 起 IG 单视频优先 h264（QQ 端兼容性），且上游锁定 pillow>=13（安全修复）
+  "parsehub>=2.4.1,<3.0.0",
+  "pillow>=13.0.0,<14.0.0",
   "pydantic>=2.0.0,<3.0.0",
 ]
 
