@@ -36,6 +36,7 @@ HOST_PLATFORMS: dict[str, str] = {
     "b23.tv": "bilibili",
     "bili2233.cn": "bilibili",
     "bilibili.com": "bilibili",
+    "bilibili.tv": "bilibili",
     "chenzhongtech.com": "kuaishou",
     "coolapk.com": "coolapk",
     "douban.com": "douban",
@@ -79,15 +80,19 @@ _SHORT_HOSTS = frozenset(
 # 内容域名的 URL 形状：对齐 ParseHub 各解析器的 __match__。
 # 只有形状也对得上才触发解析，避免“见到链接就触发”。
 _URL_SHAPES: tuple[re.Pattern[str], ...] = (
-    # B 站视频 / 专栏 / 动态
+    # B 站视频 / 专栏 / 动态 / 音乐单曲（/audio/au<号>）；首页、专辑
+    # /audio/am<号> 不匹配。2.4.3 起国内站也认语言前缀（/en/video/...、
+    # /zh-Hans/opus/...），与上游 __match__ 一致。
     re.compile(
         r"^https?://(www\.|m\.|t\.)?bilibili\.com/"
-        r"(video/|opus/|\d{18,19})",
+        r"([a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4})?/)?"
+        r"(video/|opus/|audio/au\d+|\d{18,19})",
         re.IGNORECASE,
     ),
-    # B 站音乐单曲（/audio/au<号>）；首页与专辑 /audio/am<号> 不匹配
+    # B 站国际版：/video/<号>、/play/<季>/<集>，语言前缀上游只认两位
     re.compile(
-        r"^https?://(www\.|m\.|t\.)?bilibili\.com/audio/au\d+",
+        r"^https?://(www\.|m\.)?bilibili\.tv/"
+        r"([a-zA-Z]{2}/)?(play/\d+/\d+|video/\d+)",
         re.IGNORECASE,
     ),
     # B 站直播间（插件自己处理，上游不支持）
@@ -202,7 +207,8 @@ _TRAILING_CHARS = "。，、；：！？)）】》\"'"
 _AV_ID_PATTERN = re.compile(r"/av(\d+)")
 
 # 平台内容的 ID 特征：命中就能把同一个作品的各种写法归一成同一个 key。
-# 顺序有意义，更具体的排前面（直播间 > 动态 > opus > BV > AV）。
+# 顺序有意义，更具体的排前面（直播间 > 音乐 > 动态 > opus > BV > AV）；
+# B 站国际版必须排在抖音的 ``/video/`` 前面，否则会被当成抖音作品。
 # 音乐单曲独立命名空间：号段不与视频 / 动态混，缓存按前缀认音乐。
 MUSIC_NAMESPACE = "bilibili_music"
 MUSIC_KEY_PREFIX = f"{MUSIC_NAMESPACE}:"
@@ -211,12 +217,30 @@ _ID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("bilibili_live", re.compile(r"live\.bilibili\.com/(\d+)")),
     # B 站音乐单曲：独立命名空间，不与视频 / 动态的号段混
     (MUSIC_NAMESPACE, _MUSIC_ID_PATTERN),
-    # B 站动态：18–19 位数字
-    ("bilibili", re.compile(r"bilibili\.com/(\d{18,19})(?:[/?#]|$)")),
+    # B 站动态：18–19 位数字（允许 /en/ 这类语言前缀）
+    (
+        "bilibili",
+        re.compile(
+            r"bilibili\.com/(?:[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4})?/)?"
+            r"(\d{18,19})(?:[/?#]|$)"
+        ),
+    ),
     # B 站专栏
     ("bilibili", re.compile(r"/opus/(\d+)")),
     ("bilibili", re.compile(r"(BV[0-9A-Za-z]{10})")),
     ("bilibili", _AV_ID_PATTERN),
+    # B 站国际版：video/<号> 与番剧 play/<季>/<集>。号段和国内站不通用，
+    # 单独命名空间，免得和 opus 之类的纯数字编号撞 key
+    (
+        "bilibili_tv",
+        re.compile(r"bilibili\.tv/(?:[a-zA-Z]{2}/)?video/(\d+)", re.IGNORECASE),
+    ),
+    (
+        "bilibili_tv",
+        re.compile(
+            r"bilibili\.tv/(?:[a-zA-Z]{2}/)?play/\d+/(\d+)", re.IGNORECASE
+        ),
+    ),
     ("douyin", re.compile(r"/video/(\d{6,})")),
     ("douyin", re.compile(r"/note/(\d{6,})")),
     ("douyin", re.compile(r"[?&]modal_id=(\d{6,})")),

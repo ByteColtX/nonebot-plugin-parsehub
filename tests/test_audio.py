@@ -197,6 +197,8 @@ def test_extract_bilibili_music_link(audio):
     assert audio.extract_bilibili(f"好听的歌 {_BILI_MUSIC_URL}") == (
         _BILI_MUSIC_URL
     )
+    localized = "https://www.bilibili.com/en/audio/au2854883"
+    assert audio.extract_bilibili(localized) == localized
     assert (
         audio.extract_bilibili("https://www.bilibili.com/audio/am1001") is None
     )
@@ -500,8 +502,12 @@ def test_cache_key_includes_part(audio):
 
 
 def test_cache_key_bilibili_music(audio):
-    """音乐 key 用 au 号，与视频缓存隔开。"""
+    """音乐 key 用 au 号，与视频缓存隔开；语言前缀不影响 key。"""
     assert audio.cache_key(_BILI_MUSIC_URL) == "audio:bilibili_music:2854883"
+    assert (
+        audio.cache_key("https://www.bilibili.com/en/audio/au2854883")
+        == "audio:bilibili_music:2854883"
+    )
 
 
 def test_cache_key_youtube_variants(audio):

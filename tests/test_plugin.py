@@ -185,6 +185,37 @@ def test_extract_urls_accepts_bilibili_music(plugin, keys):
     ]
 
 
+def test_extract_urls_accepts_bilibili_intl_and_locales(plugin, keys):
+    """上游 2.4.3 新增的 B 站国际版与语言前缀链接都要能触发。"""
+    text = (
+        "国际版 https://www.bilibili.tv/en/video/2045730385 "
+        "番剧 https://m.bilibili.tv/en/play/34613/341736 "
+        "国内站 https://www.bilibili.com/en/video/BV15Gsj6iEaz/ "
+        "专栏 https://www.bilibili.com/zh-Hans/opus/123 "
+        "音乐 https://www.bilibili.com/en/audio/au2854883"
+    )
+    assert keys.extract_urls(text) == [
+        "https://www.bilibili.tv/en/video/2045730385",
+        "https://m.bilibili.tv/en/play/34613/341736",
+        "https://www.bilibili.com/en/video/BV15Gsj6iEaz/",
+        "https://www.bilibili.com/zh-Hans/opus/123",
+        "https://www.bilibili.com/en/audio/au2854883",
+    ]
+
+
+def test_extract_urls_rejects_bilibili_non_content(plugin, keys):
+    """首页 / 频道页，以及上游不认的语言前缀形态，都不触发解析。"""
+    for url in (
+        "https://www.bilibili.tv/",
+        "https://www.bilibili.tv/en/",
+        "https://www.bilibili.tv/en/video/",
+        "https://www.bilibili.com/en/",
+        # 国际版只认两位语言码（与上游 __match__ 一致）
+        "https://www.bilibili.tv/zh-Hans/video/2045730385",
+    ):
+        assert keys.extract_urls(url) == [], url
+
+
 def test_content_key_bilibili_music(plugin, keys):
     """音乐单曲独立成 key，与视频 / 动态的号段不混。"""
     assert (
@@ -195,6 +226,45 @@ def test_content_key_bilibili_music(plugin, keys):
         keys.content_key("https://m.bilibili.com/audio/au2854883?from=x")
         == "bilibili_music:2854883"
     )
+    assert (
+        keys.content_key("https://www.bilibili.com/en/audio/au2854883")
+        == "bilibili_music:2854883"
+    )
+
+
+def test_content_key_bilibili_locale_prefix(plugin, keys):
+    """语言前缀不改变作品 key：/en/video/BV... 与普通链接是同一个作品。"""
+    assert (
+        keys.content_key("https://www.bilibili.com/en/video/BV15Gsj6iEaz/")
+        == "bilibili:bv15gsj6ieaz"
+    )
+    assert keys.content_key(
+        "https://www.bilibili.com/zh-Hans/opus/123"
+    ) == keys.content_key("https://www.bilibili.com/opus/123")
+    assert (
+        keys.content_key("https://www.bilibili.com/en/123456789012345678")
+        == "bilibili:123456789012345678"
+    )
+
+
+def test_content_key_bilibili_intl(plugin, keys):
+    """国际版按独立号段归一：语言前缀与 www / m 都不影响 key。"""
+    video = "bilibili_tv:2045730385"
+    assert (
+        keys.content_key("https://www.bilibili.tv/en/video/2045730385") == video
+    )
+    assert keys.content_key("https://bilibili.tv/video/2045730385") == video
+    assert (
+        keys.content_key("https://m.bilibili.tv/en/video/2045730385?t=1")
+        == video
+    )
+    play = "bilibili_tv:341736"
+    assert (
+        keys.content_key("https://www.bilibili.tv/en/play/34613/341736") == play
+    )
+    assert keys.content_key("https://bilibili.tv/play/34613/341736") == play
+    # 号段和国内站不通用，不能和同数字的专栏共用 key
+    assert video != keys.content_key("https://www.bilibili.com/opus/2045730385")
 
 
 def test_content_key_bilibili_opus_and_dynamic(plugin, keys):

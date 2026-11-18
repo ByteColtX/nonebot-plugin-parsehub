@@ -44,8 +44,10 @@ AV_PATTERN: re.Pattern[str] = re.compile(
 )
 
 # 音乐单曲页：``/audio/au<号>``。专辑（``am``）与首页不匹配。
+# 2.4.3 起国内站也认语言前缀（``/en/audio/au<号>``），与上游一致。
 MUSIC_PATTERN: re.Pattern[str] = re.compile(
-    r"bilibili\.com/audio/au(\d+)", re.IGNORECASE
+    r"bilibili\.com/(?:[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4})?/)?audio/au(\d+)",
+    re.IGNORECASE,
 )
 
 # AV → BV 的位运算常量，取自 B 站的公开换算方式。

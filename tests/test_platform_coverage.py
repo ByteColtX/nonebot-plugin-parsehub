@@ -55,6 +55,12 @@ PLATFORM_SAMPLES = (
     "https://www.tieba.baidu.com/p/123",
     "https://www.toutiao.com/article/123",
     "https://www.kuaishou.com/short-video/1",
+    # ParseHub 2.4.3：B 站国际版与 /en/ 这类语言前缀
+    "https://www.bilibili.tv/en/video/2045730385",
+    "https://bilibili.tv/video/2019955076",
+    "https://m.bilibili.tv/en/play/34613/341736",
+    "https://www.bilibili.com/en/video/BV15Gsj6iEaz/",
+    "https://www.bilibili.com/zh-Hans/opus/123",
 )
 
 
@@ -117,6 +123,17 @@ def test_platform_of_matches_upstream(url: str, upstream_hub, keys) -> None:
     upstream = upstream_hub.get_platform(url)
     assert upstream is not None, f"上游不认这条链接：{url}"
     assert keys.platform_of(url) == upstream.id, url
+
+
+@pytest.mark.parametrize("url", PLATFORM_SAMPLES)
+def test_local_shape_accepts_upstream_url(url: str, upstream_hub, keys) -> None:
+    """上游 __match__ 认得的链接，本地 URL 形状预筛也必须放行。
+
+    漏掉形状会让整条消息被静默丢弃；上游加了新形态（bilibili.tv、
+    ``/en/video/``）而本地没跟上的时候，这条会先炸。
+    """
+    assert upstream_hub.get_parser(url) is not None, f"上游不认这条链接：{url}"
+    assert keys.extract_urls(url) == [url]
 
 
 def test_every_platform_logo_exists(platforms, card) -> None:

@@ -126,7 +126,8 @@ plugins = ["nonebot_plugin_parsehub"]
 - 同作品跨会话共享缓存：命中直接发本地那份（含卡片）；`b23.tv` / 完整链接 / 裸 BV / 裸 AV（换算成 BV）算同一作品；
   同会话 120 秒内重复不发内容，解析后才认出是同一作品的只补一个成功表情，超过 24 小时重新解析
   （手动 `/解析` 吃缓存、不去重）
-- B 站链接带 `?p=N` 解析第 N P（默认 P1）；`bm` 认完整链接 / 短链 / 分享文案 / 裸 BV / 裸 AV（等价换算成 BV）；
+- B 站链接带 `?p=N` 解析第 N P（默认 P1）；B 站国际版（`bilibili.tv`）与 `/en/video/...` 这类
+  语言前缀链接同样解析；`bm` 认完整链接 / 短链 / 分享文案 / 裸 BV / 裸 AV（等价换算成 BV）；
   `ym` 认 `youtube.com`（含 music / shorts）、`youtu.be`、单独 11 位视频 ID
 - `music.youtube.com` 自动按音乐处理：卡片标「音乐」，只下载音频并发 `record` 语音，不下载视频
 - B 站音乐单曲（`bilibili.com/audio/au<号>`）自动解析：卡片标「音乐」，下载后按文件发送；
